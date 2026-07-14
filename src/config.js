@@ -4,7 +4,8 @@
 // ============================================================
 
 export const MAX_ANTS = 500;
-export const INITIAL_ANT_COUNT = 500;
+export const INITIAL_ANT_COUNT = 500;    // was 100. Equals MAX_ANTS — no headroom left if anything else
+                                          // ever spawns additional ants later
 
 // Sprite
 export const ANT_LENGTH = 5;   // was 9 — smaller ants make the fixed viewport feel like a bigger world
@@ -99,7 +100,15 @@ export const LOST_TRAIL_STEER_RATE = 7.0;   // rad/sec — stronger pull than TR
 // pattern as edgeAvoid/followTrail — doesn't apply to IDLE/HANDLING
 // ants, which don't move at all regardless.
 export const SEPARATION_RADIUS = 12;        // px — personal space radius
-export const SEPARATION_STEER_RATE = 1.2;   // rad/sec — how strongly ants push apart when crowded
+export const SEPARATION_STEER_RATE = 1.2;   // rad/sec — was 3.0, comparable in strength to SEEK_STEER_RATE
+                                             // (3.5)/TRAIL_STEER_RATE (4.5). On a busy trail an ant has
+                                             // near-constant neighbors within SEPARATION_RADIUS, so at 3.0
+                                             // this wasn't an occasional nudge, it was fighting the
+                                             // homeward pull almost every tick — enough sustained sideways
+                                             // pressure to drag RETURN ants into persistent off-path
+                                             // excursions, which then got dutifully deposited as spur
+                                             // trails leading nowhere. Should still prevent literal
+                                             // stacking over time, just without overpowering intent.
 
 // Sim rate
 export const SIM_HZ = 60;
@@ -119,38 +128,45 @@ export const STATE_HANDLING = 4; // paused briefly for pickup or dropoff — see
 // across all states — a natural follow-up once this feels stable is
 // discrete per-state speed (urgency while foraging, slowdown while
 // carrying), same idea flagged for WALK_ANIM_FPS above.
-export const SENSE_RADIUS = 75;                 // px — how far a wandering ant NOTICES food, or (while
+export const SENSE_RADIUS = 95;                 // px — was 75. How far a wandering ant NOTICES food, or (while
                                                   // carrying) that it's in the general vicinity of the
                                                   // nest — a broad awareness radius, same for both. This
                                                   // is NOT delivery precision — see NEST_ARRIVE_RADIUS
                                                   // below for that. Sensing the nest switches steering to
                                                   // aim at its true position (see foraging.js), same as
                                                   // FORAGE already steers at food's true position, not an
- 
-export const FOOD_DRAW_RADIUS = 9;                                                    // estimate.
-export const PICKUP_RADIUS = FOOD_DRAW_RADIUS + ANT_LENGTH;  // px — tight precision: must be physically at the food to pick it up
+                                                  // estimate.
 export const NEST_RADIUS = 24;                  // px — counts as reaching the ant's own BELIEVED target
                                                   // while the true nest hasn't been sensed yet (may not be
                                                   // the true nest at all — see foraging.js's WANDER fallback)
 export const SEEK_STEER_RATE = 3.5;             // rad/sec — turn-toward-target speed while tasked
-export const FOOD_AMOUNT = 25;                  // pickups per source before it's fully depleted (no auto-respawn — see world.js)
+export const FOOD_AMOUNT = 40;                  // was 10. Pickups per source before it's fully depleted (no auto-respawn — see world.js)
 export const NEST_CORNER_MARGIN = 60;           // px — nest inset from the bottom-left corner
 export const NEST_DRAW_RADIUS = 20;             // px — visual size of the nest marker
-            // px — visual size of a food marker
+export const FOOD_DRAW_RADIUS = 9;              // px — visual size of a food marker. Was 6 — bumped up,
+                                                  // partly cosmetic, partly to give PICKUP_RADIUS below more
+                                                  // room now that it's actually derived from this.
 export const NEST_ARRIVE_RADIUS = NEST_DRAW_RADIUS + ANT_LENGTH; // px — tight delivery precision once the
                                                   // true nest has been sensed — symmetric to PICKUP_RADIUS
                                                   // for food. Must be physically at the nest, not just
                                                   // "roughly nearby," to actually complete a dropoff.
+export const PICKUP_RADIUS = FOOD_DRAW_RADIUS + ANT_LENGTH; // px — same formula as NEST_ARRIVE_RADIUS above.
+                                                  // Previously an independent ANT_LENGTH*1.4 (~7px) that
+                                                  // happened to sit close to the old FOOD_DRAW_RADIUS (6px)
+                                                  // by coincidence, not by design — every FORAGE ant steering
+                                                  // at food's exact single point, combined with a radius this
+                                                  // tight, meant separation had almost no room to work,
+                                                  // producing visible jams/circling right at the food marker.
 
 // Handling pauses — pickup/dropoff aren't instant. Ant holds still
 // (frozen on its current walk frame, same as idle) for a brief random
 // duration before continuing. Both use STATE_HANDLING; which duration
 // applies depends on context at the moment the pause starts (see
 // foraging.js). Reuses stateTimer, same mechanism as IDLE_MIN/MAX.
-export const PICKUP_MIN = 0.3;  // seconds — brief pause "grabbing" food before departing
-export const PICKUP_MAX = 0.7;
-export const DROPOFF_MIN = 0.3; // seconds — brief pause "handing off" food at the nest
-export const DROPOFF_MAX = 0.7;
+export const PICKUP_MIN = 0.5;  // seconds — was 0.3. Brief pause "grabbing" food before departing
+export const PICKUP_MAX = 1.0;  // was 0.7
+export const DROPOFF_MIN = 0.5; // was 0.3. Brief pause "handing off" food at the nest
+export const DROPOFF_MAX = 1.0; // was 0.7
 
 // Path integration (dead reckoning) — RETURN steering uses this instead
 // of reading nest.x/y directly. Updated every tick an ant actually
@@ -174,8 +190,29 @@ export const IDLE_TWITCH_AMOUNT = 0.6;   // radians, single snap
 export const WANDER_STRENGTH = 4.0;      // rad/sec² — noise magnitude injected into angular velocity
 export const WANDER_DAMPING = 3.0;       // 1/sec — how strongly angular velocity is pulled back to 0
 
-// Edge behavior
-export const EDGE_MARGIN = 22;           // px — band width where edge logic activates
-export const EDGE_STEER_BASE = 1.5;      // gentle bias while roughly parallel to the wall
-export const EDGE_STEER_URGENCY = 9.0;   // extra correction when heading straight at the wall
-export const HUG_FRACTION = 0.85;        // 0-1 — target closeness to wall once hugging
+// Surface avoidance — shared by walls AND obstacles (see avoidSurfaces()
+// in behaviors.js). These used to be two separate, independently-tuned
+// systems (EDGE_* for walls, OBSTACLE_* for rocks) that could fight
+// each other when a rock sat close to a wall — each computed its own
+// steering correction with no idea the other existed, same class of
+// problem as the obstacle-obstacle notch bug, just between two systems
+// that were never unified. Now genuinely one system: walls and
+// obstacles both contribute a push vector to the SAME combined
+// calculation, so there's only ever one coherent correction, regardless
+// of how many surfaces (walls, rocks, or both) an ant is near at once.
+export const AVOID_MARGIN = 12;          // px — was 18, before that 30/20. Kept shrinking for the same
+                                          // reason each time: narrow gaps between obstacles read as
+                                          // blocked when two nearby margin zones overlap in the opening.
+export const AVOID_STEER_BASE = 1.0;     // was 1.5. Gentle bias while roughly parallel to a surface — kept loose
+                                          // deliberately, so wander/seek can occasionally win and let an
+                                          // ant break away, rather than getting trapped hugging forever
+                                          // (circles especially have no corner to force an exit)
+export const AVOID_STEER_URGENCY = 12.0; // extra correction when heading straight at a surface — this is
+                                          // the part that needs to win decisively
+export const AVOID_HUG_FRACTION = 0.85;  // 0-1 — target closeness once hugging
+
+// Obstacles — hand-placed circular rocks (Shift+Click, see main.js).
+// Obstacle count is expected to stay small (hand-placed), so avoidance
+// does a plain per-ant linear scan over all obstacles — no spatial grid
+// needed here, unlike ant-ant separation where ant count can be huge.
+export const OBSTACLE_RADIUS = 25;       // px — size of a placed rock

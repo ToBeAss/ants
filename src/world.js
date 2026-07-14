@@ -17,6 +17,16 @@ export const nest = { x: 0, y: 0 };
 // data-model change.
 export const food = [];
 
+// Array of {x, y, radius} — circular obstacles, hand-placed via
+// Shift+Click (see main.js). Kept simple: no shapes beyond circles for
+// now, and no collision between obstacles themselves (overlapping rocks
+// are visually fine, nothing needs them to be non-intersecting).
+export const obstacles = [];
+
+export function addObstacle(x, y, radius) {
+  obstacles.push({ x, y, radius });
+}
+
 export function initWorld(width, height) {
   // bottom-left corner, inset enough to clear the wall-hugging margin
   nest.x = NEST_CORNER_MARGIN;

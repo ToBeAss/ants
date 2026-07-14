@@ -3,7 +3,7 @@
 // Reads ant state; never mutates it.
 // ============================================================
 import { ants } from './ants.js';
-import { nest, food } from './world.js';
+import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
 import {
   ANT_LENGTH, WALK_FRAME_COUNT,
@@ -125,8 +125,15 @@ function drawAntSprite(x, y, angle, animPhase) {
 const pheromoneCanvas = document.createElement('canvas');
 const pheromoneCtx = pheromoneCanvas.getContext('2d');
 let pheromoneImageData = null;
+let showTrail = true; // toggled via the 'T' key, see main.js
+
+export function toggleTrailVisibility() {
+  showTrail = !showTrail;
+}
 
 function drawPheromones() {
+  if (!showTrail) return; // toggled off — skip the per-cell loop too, not just the draw
+
   const { grid, cols, rows } = getPheromoneGrid();
   if (cols === 0 || rows === 0) return;
 
@@ -163,6 +170,15 @@ function drawWorld() {
   for (const f of food) {
     ctx.beginPath();
     ctx.arc(f.x, f.y, FOOD_DRAW_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // obstacles — plain stone-grey circles, distinct from the brown nest
+  // and green food markers
+  ctx.fillStyle = '#8a8a8a';
+  for (const obs of obstacles) {
+    ctx.beginPath();
+    ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
     ctx.fill();
   }
 }

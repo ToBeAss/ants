@@ -5,13 +5,13 @@
 // hard-clamp backstop.
 // ============================================================
 import { ants } from './ants.js';
-import { updateIdleState, wander, edgeAvoid, integrate, separationSteer } from './behaviors.js';
+import { updateIdleState, wander, avoidSurfaces, integrate, separationSteer } from './behaviors.js';
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
 import { rebuildSpatialGrid } from './spatialGrid.js';
+import { obstacles } from './world.js';
 import {
   ANT_LENGTH,
-  EDGE_MARGIN, EDGE_STEER_BASE, EDGE_STEER_URGENCY,
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
   WALK_ANIM_FPS,
   STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN,
@@ -87,14 +87,14 @@ export function simStep(dt) {
       depositPheromone(ants.x[i], ants.y[i], dt); // laying trail on the way home with food
     }
 
-    // wander()/updateForageSteer()/edgeAvoid() only adjust rotation —
-    // integrate() below is the only thing that actually moves the ant,
-    // so the pre-movement position can be captured here regardless of
-    // which branch ran above.
+    // wander()/updateForageSteer() only adjust rotation — integrate()
+    // below is the only thing that actually moves the ant, so the
+    // pre-movement position can be captured here regardless of which
+    // branch ran above.
     const prevX = ants.x[i];
     const prevY = ants.y[i];
 
-    edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt, EDGE_STEER_BASE, EDGE_STEER_URGENCY);
+    avoidSurfaces(ants, i, w, h, obstacles, dt); // walls AND rocks, one coherent correction — see behaviors.js
     separationSteer(ants, i, dt); // steer away from crowding — see behaviors.js/spatialGrid.js
     integrate(ants, i, dt, speedMult);
 
@@ -123,5 +123,22 @@ export function simStep(dt) {
     if (ants.x[i] > w - ANT_LENGTH) ants.x[i] = w - ANT_LENGTH;
     if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
     if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
+
+    // obstacle hard clamp — same backstop role as the wall clamp above:
+    // obstacleAvoid should normally prevent this, but if steering ever
+    // doesn't react fast enough (very fast approach, tight corner
+    // between obstacles, etc.), push the ant back out to the surface
+    // rather than letting it visibly clip inside a rock.
+    for (const obs of obstacles) {
+      const dx = ants.x[i] - obs.x;
+      const dy = ants.y[i] - obs.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = obs.radius + ANT_LENGTH;
+      if (dist < minDist && dist > 0.0001) {
+        const push = minDist - dist;
+        ants.x[i] += (dx / dist) * push;
+        ants.y[i] += (dy / dist) * push;
+      }
+    }
   }
 }
