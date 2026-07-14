@@ -23,7 +23,9 @@ export function updateIdleState(ants, i, dt) {
   if (Math.random() < IDLE_ENTER_CHANCE * dt) {
     ants.state[i] = STATE_IDLE;
     ants.stateTimer[i] = IDLE_MIN + Math.random() * (IDLE_MAX - IDLE_MIN);
-    ants.animPhase[i] = 0; // snap to resting frame — no mid-stride freeze
+    // animPhase deliberately left untouched — freezes on whatever walk
+    // frame was mid-stride, so idle reads as a natural pause rather than
+    // snapping to a fixed rest pose.
     return true;
   }
 

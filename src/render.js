@@ -9,19 +9,19 @@ export const canvas = document.getElementById('canvas');
 export const ctx = canvas.getContext('2d');
 
 // ------------------------------------------------------------
-// Sprite frames — a short walk-cycle extracted from the source sheet
-// (assets/walk/ant_0.png .. ant_5.png). All frames share one crop box,
-// so the pivot point doesn't drift frame to frame.
+// Sprite frames — the walk cycle (6 frames). Used for both wandering
+// AND idle: while idle, sim.js stops advancing animPhase, so the ant
+// simply holds on whatever frame it was mid-stride on — a natural
+// freeze rather than a separate rest pose.
 //
-// The frames face "up" (-Y). rotation=0 in this sim means facing
-// "right" (+X), matching the Math.cos/sin convention used in
-// integrate()/wander(). SPRITE_ANGLE_OFFSET corrects for that
-// mismatch — adjust or remove this if different-orientation frames
-// are swapped in later.
+// Faces "up" (-Y). rotation=0 in this sim means facing "right" (+X),
+// matching the Math.cos/sin convention used in integrate()/wander().
+// SPRITE_ANGLE_OFFSET corrects for that — adjust if a different-
+// orientation sprite is swapped in later.
 // ------------------------------------------------------------
 const SPRITE_ANGLE_OFFSET = Math.PI / 2;
 
-const antFrames = [];
+const walkFrames = [];
 let framesLoaded = 0;
 let spriteReady = false;
 
@@ -31,8 +31,8 @@ for (let i = 0; i < WALK_FRAME_COUNT; i++) {
     framesLoaded++;
     if (framesLoaded === WALK_FRAME_COUNT) spriteReady = true;
   };
-  img.src = `assets/walk/ant_${i}.png`;
-  antFrames.push(img);
+  img.src = `assets/ant_${i}.png`;
+  walkFrames.push(img);
 }
 
 // Draw size in world px, independent of the source PNGs' resolution.
@@ -40,14 +40,9 @@ for (let i = 0; i < WALK_FRAME_COUNT; i++) {
 // etc.) — drawn nose-to-tail length is roughly double that.
 const SPRITE_DRAW_HEIGHT = ANT_LENGTH * 2.4;
 let spriteDrawWidth = SPRITE_DRAW_HEIGHT * 0.81; // fallback aspect until frame 0 loads
-antFrames[0].addEventListener('load', () => {
-  spriteDrawWidth = SPRITE_DRAW_HEIGHT * (antFrames[0].naturalWidth / antFrames[0].naturalHeight);
+walkFrames[0].addEventListener('load', () => {
+  spriteDrawWidth = SPRITE_DRAW_HEIGHT * (walkFrames[0].naturalWidth / walkFrames[0].naturalHeight);
 });
-
-// Frames loop forward: 0,1,2,3,4,5,0,1,2,... The closing seam (5->0) is
-// roughly the same magnitude as every other inter-frame step at this
-// sampling coarseness, so it doesn't read as a pop — and unlike ping-pong,
-// legs always advance in one direction rather than visibly reversing stride.
 
 export function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -83,7 +78,7 @@ function drawAntFallback(x, y, angle) {
 }
 
 function drawAntSprite(x, y, angle, animPhase) {
-  const frame = antFrames[Math.floor(animPhase) % WALK_FRAME_COUNT];
+  const frame = walkFrames[Math.floor(animPhase) % WALK_FRAME_COUNT];
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle + SPRITE_ANGLE_OFFSET);

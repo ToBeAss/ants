@@ -3,16 +3,23 @@
 // hardcode a tuning value; import it from here instead.
 // ============================================================
 
-export const MAX_ANTS = 500;
+export const MAX_ANTS = 10000;
 export const INITIAL_ANT_COUNT = 100;
 
 // Sprite
-export const ANT_LENGTH = 8; // 6 original
-export const ANT_WIDTH = 2.5;
+export const ANT_LENGTH = 9;   // was 6 — also doubles as the wall hard-clamp radius, see sim.js
+export const ANT_WIDTH = 2.5;  // currently only used by the brief pre-load triangle fallback
 
 // Walk-cycle animation
 export const WALK_FRAME_COUNT = 6;   // frames extracted from the source sheet
-export const WALK_ANIM_FPS = 14;    // frame-steps/sec while wandering — cadence of the leg swing
+export const WALK_ANIM_FPS = 14;     // frame-steps/sec while wandering — cadence of the leg swing
+                                      // TODO: currently fixed regardless of ants.speed[i]. Fine while
+                                      // speed variance is small, but once discrete per-state speeds
+                                      // exist (forage/carry/etc.), scale this by speed ratio so faster
+                                      // ants visibly step faster — e.g. WALK_ANIM_FPS * (speed / baseSpeed)
+                                      //
+                                      // Idle uses these same frames — sim.js stops advancing animPhase
+                                      // while idle, so the ant just holds its last walking frame.
 
 // Sim rate
 export const SIM_HZ = 60;

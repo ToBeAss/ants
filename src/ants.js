@@ -3,7 +3,7 @@
 // (swap-and-pop on kill) — use `id` + idToIndex for anything that
 // needs to reference a specific ant persistently (favorites, names).
 // ============================================================
-import { MAX_ANTS, STATE_IDLE } from './config.js';
+import { MAX_ANTS, STATE_IDLE, WALK_FRAME_COUNT } from './config.js';
 
 export const ants = {
   x: new Float32Array(MAX_ANTS),
@@ -31,7 +31,7 @@ export function spawnAnt(x, y) {
   ants.rotationSpeed[i] = Math.random() * 2 * Math.PI;
   ants.state[i] = STATE_IDLE;
   ants.stateTimer[i] = 0;
-  ants.animPhase[i] = Math.random() * 10; // random offset — avoids synced marching across ants
+  ants.animPhase[i] = Math.random() * WALK_FRAME_COUNT; // random starting frame — avoids synced marching across ants
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;

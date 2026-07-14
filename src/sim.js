@@ -23,6 +23,8 @@ export function simStep(dt) {
       if (Math.random() < IDLE_TWITCH_CHANCE * dt) {
         ants.rotation[i] += (Math.random() - 0.5) * IDLE_TWITCH_AMOUNT;
       }
+      // animPhase intentionally not advanced — ant holds on the walk
+      // frame it stopped on. See behaviors.js.
       continue;
     }
 
