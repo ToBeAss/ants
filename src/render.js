@@ -4,10 +4,12 @@
 // ============================================================
 import { ants } from './ants.js';
 import { nest, food } from './world.js';
+import { getPheromoneGrid } from './pheromones.js';
 import {
   ANT_LENGTH, WALK_FRAME_COUNT,
   SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
   NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
+  PHEROMONE_COLOR, PHEROMONE_MAX,
 } from './config.js';
 
 export const canvas = document.getElementById('canvas');
@@ -110,6 +112,45 @@ function drawAntSprite(x, y, angle, animPhase) {
   ctx.restore();
 }
 
+// ------------------------------------------------------------
+// Pheromone overlay — the grid is coarse (PHEROMONE_CELL_SIZE px per
+// cell), so it's rendered to a small offscreen canvas at grid
+// resolution and blitted as ONE scaled drawImage call per frame — not
+// per-cell rect fills, which would be far too many draw calls at
+// realistic grid sizes (same category of perf concern as the sprite
+// rotation cost discussed earlier). The backing ImageData buffer is
+// created once and reused (its .data rewritten each frame), not
+// reallocated every frame.
+// ------------------------------------------------------------
+const pheromoneCanvas = document.createElement('canvas');
+const pheromoneCtx = pheromoneCanvas.getContext('2d');
+let pheromoneImageData = null;
+
+function drawPheromones() {
+  const { grid, cols, rows } = getPheromoneGrid();
+  if (cols === 0 || rows === 0) return;
+
+  if (!pheromoneImageData || pheromoneImageData.width !== cols || pheromoneImageData.height !== rows) {
+    pheromoneCanvas.width = cols;
+    pheromoneCanvas.height = rows;
+    pheromoneImageData = pheromoneCtx.createImageData(cols, rows);
+  }
+
+  const data = pheromoneImageData.data;
+  const [r, g, b] = PHEROMONE_COLOR;
+  for (let i = 0; i < grid.length; i++) {
+    const alpha = Math.min(1, grid[i] / PHEROMONE_MAX);
+    const o = i * 4;
+    data[o] = r;
+    data[o + 1] = g;
+    data[o + 2] = b;
+    data[o + 3] = alpha * 180; // capped opacity — never fully obscures ants/ground beneath it
+  }
+
+  pheromoneCtx.putImageData(pheromoneImageData, 0, 0);
+  ctx.drawImage(pheromoneCanvas, 0, 0, cols, rows, 0, 0, window.innerWidth, window.innerHeight);
+}
+
 function drawWorld() {
   // nest — simple dirt-mound marker
   ctx.beginPath();
@@ -139,6 +180,7 @@ export function render() {
   const h = window.innerHeight;
   ctx.clearRect(0, 0, w, h);
 
+  drawPheromones();
   drawWorld();
 
   for (let i = 0; i < ants.count; i++) {

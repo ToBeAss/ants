@@ -8,10 +8,12 @@ import { spawnAnt } from './ants.js';
 import { simStep } from './sim.js';
 import { resizeCanvas, render, canvas } from './render.js';
 import { initWorld, nest, spawnFoodAt } from './world.js';
+import { initPheromones } from './pheromones.js';
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 initWorld(window.innerWidth, window.innerHeight);
+initPheromones(window.innerWidth, window.innerHeight);
 
 // Food only ever appears via click — no auto-spawn, no auto-respawn.
 // getBoundingClientRect() converts the click's viewport coordinates into

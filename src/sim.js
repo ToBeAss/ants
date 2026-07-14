@@ -5,8 +5,10 @@
 // hard-clamp backstop.
 // ============================================================
 import { ants } from './ants.js';
-import { updateIdleState, wander, edgeAvoid, integrate } from './behaviors.js';
+import { updateIdleState, wander, edgeAvoid, integrate, separationSteer } from './behaviors.js';
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
+import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
+import { rebuildSpatialGrid } from './spatialGrid.js';
 import {
   ANT_LENGTH,
   EDGE_MARGIN, EDGE_STEER_BASE, EDGE_STEER_URGENCY,
@@ -20,6 +22,10 @@ import {
 export function simStep(dt) {
   const w = window.innerWidth;
   const h = window.innerHeight;
+
+  decayPheromones(dt); // once per tick, not per ant — a single pass over the whole grid
+  diffusePheromones(dt); // ditto — spreads the trail, separate concern from decay shrinking it
+  rebuildSpatialGrid(ants); // ditto — bins every ant fresh, used by separationSteer below
 
   for (let i = 0; i < ants.count; i++) {
     const state = ants.state[i];
@@ -37,6 +43,7 @@ export function simStep(dt) {
       }
 
       wander(ants, i, dt);
+      followTrail(ants, i, dt, ants.carrying[i] === 1); // eager pull if lost & still carrying — see pheromones.js
       checkFoodDetection(ants, i); // may promote WANDER -> FORAGE (skipped if already carrying)
       checkNestDetection(ants, i); // may promote WANDER -> RETURN (only if carrying, near true nest)
     } else if (state === STATE_HANDLING) {
@@ -51,6 +58,20 @@ export function simStep(dt) {
       // FORAGE or RETURN — task-committed: no idling, no wander noise,
       // straight-line steering toward the current target instead.
       updateForageSteer(ants, i, dt, w, h);
+
+      if (state === STATE_RETURN) {
+        // Returning ants also lean toward nearby existing trail, not
+        // just their own homeVector belief — without this, every
+        // returning ant independently computes a slightly different
+        // path home, spreading deposits across many nearby-but-distinct
+        // cells instead of one shared route. This is what lets multiple
+        // trips actually reinforce the SAME path (the classic tight
+        // ant-trail convergence effect), rather than each ant
+        // permanently carving its own line. Reuses the exact same
+        // sensing/steering as WANDER's trail-following — it doesn't
+        // care why it's being called, just biases toward what's nearby.
+        followTrail(ants, i, dt);
+      }
     }
 
     // Re-read state here rather than reuse the `state` captured above —
@@ -61,7 +82,10 @@ export function simStep(dt) {
     const currentState = ants.state[i];
     let speedMult = 1;
     if (currentState === STATE_FORAGE) speedMult = FORAGE_SPEED_MULT;
-    else if (currentState === STATE_RETURN) speedMult = RETURN_SPEED_MULT;
+    else if (currentState === STATE_RETURN) {
+      speedMult = RETURN_SPEED_MULT;
+      depositPheromone(ants.x[i], ants.y[i], dt); // laying trail on the way home with food
+    }
 
     // wander()/updateForageSteer()/edgeAvoid() only adjust rotation —
     // integrate() below is the only thing that actually moves the ant,
@@ -71,6 +95,7 @@ export function simStep(dt) {
     const prevY = ants.y[i];
 
     edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt, EDGE_STEER_BASE, EDGE_STEER_URGENCY);
+    separationSteer(ants, i, dt); // steer away from crowding — see behaviors.js/spatialGrid.js
     integrate(ants, i, dt, speedMult);
 
     // Path integration: continuously accumulate this tick's true

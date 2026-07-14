@@ -8,7 +8,9 @@ import {
   IDLE_ENTER_CHANCE, IDLE_MIN, IDLE_MAX,
   WANDER_STRENGTH, WANDER_DAMPING,
   HUG_FRACTION,
+  SEPARATION_RADIUS, SEPARATION_STEER_RATE,
 } from './config.js';
+import { forEachNearby } from './spatialGrid.js';
 
 export function updateIdleState(ants, i, dt) {
   if (ants.state[i] === STATE_IDLE) {
@@ -82,4 +84,36 @@ export function integrate(ants, i, dt, speedMultiplier = 1) {
   const speed = ants.speed[i] * speedMultiplier;
   ants.x[i] += Math.cos(ants.rotation[i]) * speed * dt;
   ants.y[i] += Math.sin(ants.rotation[i]) * speed * dt;
+}
+
+// Steers away from other ants that get too close — rotation only, same
+// additive-bias pattern as edgeAvoid. Queries the spatial grid rather
+// than every other ant directly (see spatialGrid.js). Combines all
+// nearby pushes into one direction, weighted so closer ants push
+// harder, rather than reacting to just the single nearest one.
+export function separationSteer(ants, i, dt) {
+  let pushX = 0;
+  let pushY = 0;
+  let count = 0;
+  const radiusSq = SEPARATION_RADIUS * SEPARATION_RADIUS;
+
+  forEachNearby(ants, i, (j) => {
+    const dx = ants.x[i] - ants.x[j];
+    const dy = ants.y[i] - ants.y[j];
+    const distSq = dx * dx + dy * dy;
+    if (distSq < radiusSq && distSq > 0.0001) {
+      const dist = Math.sqrt(distSq);
+      const weight = (SEPARATION_RADIUS - dist) / SEPARATION_RADIUS; // closer = stronger push
+      pushX += (dx / dist) * weight;
+      pushY += (dy / dist) * weight;
+      count++;
+    }
+  });
+
+  if (count === 0) return; // nothing nearby, nothing to do
+
+  const targetAngle = Math.atan2(pushY, pushX);
+  let diff = targetAngle - ants.rotation[i];
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  ants.rotation[i] += diff * SEPARATION_STEER_RATE * dt;
 }
