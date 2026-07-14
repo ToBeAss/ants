@@ -96,10 +96,15 @@
         // ============================================================
         // Sim step — wander steering + edge avoidance + integration
         // ============================================================
-        const WANDER_STRENGTH = 2.0;   // radians/sec^ (random walk rate on heading velocity)
-        const TURN_SMOOTH = 3.0;       // how fast heading chases wanderTheta target
-        const EDGE_MARGIN = 60;        // px from wall where avoidance kicks in
-        const EDGE_TURN = 2.5;         // radians/sec steer strength near walls
+        // Wander (open-field behavior)
+        const WANDER_STRENGTH = 4.0;   // rad/sec² — noise magnitude injected into angular velocity
+        const WANDER_DAMPING  = 3.0;   // 1/sec — how strongly angular velocity is pulled back to 0
+
+        // Edge behavior
+        const EDGE_MARGIN = 22;        // px — band width where edge logic activates
+        const EDGE_STEER_BASE    = 1.0; // gentle bias while roughly parallel to the wall
+        const EDGE_STEER_URGENCY = 9.0; // extra correction when heading straight at the wall
+        const HUG_FRACTION = 0.85;     // 0-1 — target closeness to wall once hugging
 
         function simStep(dt) {
             const w = window.innerWidth;
@@ -110,25 +115,59 @@
                 edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt);
                 integrate(ants, i, dt);
 
-                // hard clamp as a safety net (edge avoidance should prevent this triggering)
-                if (ants.x[i] < 0) ants.x[i] = 0;
-                if (ants.x[i] > w) ants.x[i] = w;
-                if (ants.y[i] < 0) ants.y[i] = 0;
-                if (ants.y[i] > h) ants.y[i] = h;
+                // hard clamp accounts for body extent, not just center point —
+                // ANT_LENGTH is the furthest offset from center (the nose)
+                if (ants.x[i] < ANT_LENGTH) ants.x[i] = ANT_LENGTH;
+                if (ants.x[i] > w - ANT_LENGTH) ants.x[i] = w - ANT_LENGTH;
+                if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
+                if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
             }
         }
         
         function wander(ants, i, dt) {
-            const WANDER_STRENGTH = 0.3; // How sharply the ant can turn per tick
-            ants.rotationSpeed[i] += (Math.random() - 0.5) * WANDER_STRENGTH;
-            ants.rotation[i] += ants.rotationSpeed[i] * 0.05 * dt;
+            const noise = (Math.random() - 0.5) * Math.sqrt(12); // rescale to unit variance
+            ants.rotationSpeed[i] += WANDER_STRENGTH * noise * Math.sqrt(dt);
+            ants.rotationSpeed[i] -= ants.rotationSpeed[i] * WANDER_DAMPING * dt;
+            ants.rotation[i] += ants.rotationSpeed[i] * dt;
         }
 
         function edgeAvoid(ants, i, width, height, margin, dt) {
-            if (ants.x[i] < margin) ants.rotation[i] += EDGE_TURN * dt;
-            else if (ants.x[i] > width - margin) ants.rotation[i] -= EDGE_TURN * dt;
-            if (ants.y[i] < margin) ants.rotation[i] += EDGE_TURN * dt;
-            else if (ants.y[i] > height - margin) ants.rotation[i] -= EDGE_TURN * dt;
+            let pushX = 0, pushY = 0;
+            if (ants.x[i] < margin) pushX += (margin - ants.x[i]);
+            else if (ants.x[i] > width - margin) pushX -= (ants.x[i] - (width - margin));
+            if (ants.y[i] < margin) pushY += (margin - ants.y[i]);
+            else if (ants.y[i] > height - margin) pushY -= (ants.y[i] - (height - margin));
+
+            if (pushX === 0 && pushY === 0) return;
+
+            const depth = Math.hypot(pushX, pushY); // 0 at margin's outer edge, ~margin at the wall
+            const nx = pushX / depth, ny = pushY / depth; // points away from wall
+
+            const hx = Math.cos(ants.rotation[i]), hy = Math.sin(ants.rotation[i]);
+            const tA = { x: -ny, y: nx };
+            const tB = { x: ny, y: -nx };
+            const tangent = (tA.x * hx + tA.y * hy) > (tB.x * hx + tB.y * hy) ? tA : tB;
+
+            // signed error vs desired hug distance: positive = too far from wall, negative = too close
+            const desiredDepth = margin * HUG_FRACTION;
+            const e = Math.max(-1, Math.min(1, (desiredDepth - depth) / margin));
+            // e>0 pulls toward the wall (-normal), e<0 pushes away from it (+normal) — same vector, signed
+            const desiredX = tangent.x * (1 - Math.abs(e)) - nx * e;
+            const desiredY = tangent.y * (1 - Math.abs(e)) - ny * e;
+
+            // danger: how directly the ant is currently heading INTO the wall.
+            // +1 = heading straight away from wall (safe), -1 = heading straight at it (urgent).
+            const headingDot = hx * nx + hy * ny;
+            const danger = Math.max(0, -headingDot); // 0 when safe/parallel, ramps to 1 when charging straight in
+
+            // blend base (loose hug, lets wander win) with urgency (sharp correction to avoid headbutt)
+            const steerRate = EDGE_STEER_BASE + EDGE_STEER_URGENCY * danger;
+
+            const targetAngle = Math.atan2(desiredY, desiredX);
+            let diff = targetAngle - ants.rotation[i];
+            diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+
+            ants.rotation[i] += diff * steerRate * dt;
         }
 
         function integrate(ants, i, dt) {
