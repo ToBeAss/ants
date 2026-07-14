@@ -9,6 +9,7 @@ import {
   ANT_LENGTH,
   EDGE_MARGIN, EDGE_STEER_BASE, EDGE_STEER_URGENCY,
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
+  WALK_ANIM_FPS,
 } from './config.js';
 
 export function simStep(dt) {
@@ -28,6 +29,7 @@ export function simStep(dt) {
     wander(ants, i, dt);
     edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt, EDGE_STEER_BASE, EDGE_STEER_URGENCY);
     integrate(ants, i, dt);
+    ants.animPhase[i] += WALK_ANIM_FPS * dt;
 
     // hard clamp accounts for body extent, not just center point —
     // ANT_LENGTH is the furthest offset from center (the nose)

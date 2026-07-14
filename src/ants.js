@@ -13,6 +13,7 @@ export const ants = {
   rotationSpeed: new Float32Array(MAX_ANTS),
   state: new Uint8Array(MAX_ANTS),
   stateTimer: new Float32Array(MAX_ANTS),
+  animPhase: new Float32Array(MAX_ANTS), // walk-cycle clock, in "frame steps"
   id: new Uint32Array(MAX_ANTS),
   count: 0,
 };
@@ -30,6 +31,7 @@ export function spawnAnt(x, y) {
   ants.rotationSpeed[i] = Math.random() * 2 * Math.PI;
   ants.state[i] = STATE_IDLE;
   ants.stateTimer[i] = 0;
+  ants.animPhase[i] = Math.random() * 10; // random offset — avoids synced marching across ants
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -49,6 +51,7 @@ export function killAnt(index) {
     ants.rotationSpeed[index] = ants.rotationSpeed[last];
     ants.state[index] = ants.state[last];
     ants.stateTimer[index] = ants.stateTimer[last];
+    ants.animPhase[index] = ants.animPhase[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

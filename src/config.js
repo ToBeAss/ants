@@ -7,8 +7,12 @@ export const MAX_ANTS = 500;
 export const INITIAL_ANT_COUNT = 100;
 
 // Sprite
-export const ANT_LENGTH = 6;
+export const ANT_LENGTH = 8; // 6 original
 export const ANT_WIDTH = 2.5;
+
+// Walk-cycle animation
+export const WALK_FRAME_COUNT = 6;   // frames extracted from the source sheet
+export const WALK_ANIM_FPS = 14;    // frame-steps/sec while wandering — cadence of the leg swing
 
 // Sim rate
 export const SIM_HZ = 60;
