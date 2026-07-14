@@ -52,6 +52,7 @@
             speed: new Float32Array(MAX_ANTS),
             rotationSpeed: new Float32Array(MAX_ANTS),
             state: new Uint8Array(MAX_ANTS),
+            idleTimer: new Float32Array(MAX_ANTS),
             id: new Uint32Array(MAX_ANTS),
             count: 0,
         }
@@ -69,6 +70,7 @@
             ants.speed[i] = 40 + Math.random() * 15;
             ants.rotationSpeed[i] = Math.random() * 2 * Math.PI;
             ants.state[i] = 0;
+            ants.idleTimer[i] = 0;
             ants.id[i] = id;
             idToIndex.set(id, i);
             return id;
@@ -87,6 +89,7 @@
             ants.speed[index] = ants.speed[last];
             ants.rotationSpeed[index] = ants.rotationSpeed[last];
             ants.state[index] = ants.state[last];
+            ants.idleTimer[index] = ants.idleTimer[last];
             ants.id[index] = ants.id[last];
             idToIndex.set(ants.id[index], index);  // update the moved ant's mapping
         }
@@ -96,13 +99,23 @@
         // ============================================================
         // Sim step — wander steering + edge avoidance + integration
         // ============================================================
+        // States
+        const STATE_WANDER = 0;
+        const STATE_IDLE   = 1;
+
+        const IDLE_ENTER_CHANCE = 0.08;  // per second — chance to start idling while wandering
+        const IDLE_MIN = 0.5;            // seconds
+        const IDLE_MAX = 2.0;            // seconds
+        const IDLE_TWITCH_CHANCE = 4.5; // per second — how often a twitch fires while idle
+        const IDLE_TWITCH_AMOUNT = 0.6; // radians, single snap
+        
         // Wander (open-field behavior)
         const WANDER_STRENGTH = 4.0;   // rad/sec² — noise magnitude injected into angular velocity
         const WANDER_DAMPING  = 3.0;   // 1/sec — how strongly angular velocity is pulled back to 0
 
         // Edge behavior
         const EDGE_MARGIN = 22;        // px — band width where edge logic activates
-        const EDGE_STEER_BASE    = 1.0; // gentle bias while roughly parallel to the wall
+        const EDGE_STEER_BASE    = 1.5; // gentle bias while roughly parallel to the wall
         const EDGE_STEER_URGENCY = 9.0; // extra correction when heading straight at the wall
         const HUG_FRACTION = 0.85;     // 0-1 — target closeness to wall once hugging
 
@@ -111,6 +124,14 @@
             const h = window.innerHeight;
 
             for (let i = 0; i < ants.count; i++) {
+                const idle = updateIdleState(ants, i, dt);
+
+                if (idle) {
+                    if (Math.random() < IDLE_TWITCH_CHANCE * dt) {
+                        ants.rotation[i] += (Math.random() - 0.5) * IDLE_TWITCH_AMOUNT;
+                    }
+                    continue;
+                }
                 wander(ants, i, dt);
                 edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt);
                 integrate(ants, i, dt);
@@ -122,6 +143,25 @@
                 if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
                 if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
             }
+        }
+
+        function updateIdleState(ants, i, dt) {
+            if (ants.state[i] === STATE_IDLE) {
+                ants.idleTimer[i] -= dt;
+                if (ants.idleTimer[i] <= 0) {
+                    ants.state[i] = STATE_WANDER;
+                }
+                return true; // currently idle
+            }
+
+            // wandering — roll for a chance to start idling this tick
+            if (Math.random() < IDLE_ENTER_CHANCE * dt) {
+                ants.state[i] = STATE_IDLE;
+                ants.idleTimer[i] = IDLE_MIN + Math.random() * (IDLE_MAX - IDLE_MIN);
+                return true;
+            }
+
+            return false; // stays wandering
         }
         
         function wander(ants, i, dt) {
