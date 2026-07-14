@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Ant Colony</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #1a1410;
+            overflow: hidden;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        // ============================================================
+        // Canvas setup — devicePixelRatio-aware so it stays sharp on HiDPI
+        // ============================================================
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels, not device pixels
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        // ============================================================
+        // Ant data — Structure of Arrays (SoA)
+        // ============================================================
+        const MAX_ANTS = 500;
+
+        const ants = {
+            x: new Float32Array(MAX_ANTS),
+            y: new Float32Array(MAX_ANTS),
+            rotation: new Float32Array(MAX_ANTS),
+            speed: new Float32Array(MAX_ANTS),
+            rotationSpeed: new Float32Array(MAX_ANTS),
+            state: new Uint8Array(MAX_ANTS),
+            id: new Uint32Array(MAX_ANTS),
+            count: 0,
+        }
+
+        let nextId = 1;
+        const idToIndex = new Map();
+
+
+        function spawnAnt(x, y) {
+            const i = ants.count++;
+            const id = nextId++;
+            ants.x[i] = x;
+            ants.y[i] = y;
+            ants.rotation[i] = Math.random() * 2 * Math.PI;
+            ants.speed[i] = 40 + Math.random() * 15;
+            ants.rotationSpeed[i] = Math.random() * 2 * Math.PI;
+            ants.state[i] = 0;
+            ants.id[i] = id;
+            idToIndex.set(id, i);
+            return id;
+        }
+
+        function killAnt(index) {
+            const last = ants.count - 1;
+            const deadId = ants.id[index];
+            idToIndex.delete(deadId);
+
+            if (index !== last) {
+            // swap last into the gap
+            ants.x[index] = ants.x[last];
+            ants.y[index] = ants.y[last];
+            ants.rotation[index] = ants.rotation[last];
+            ants.speed[index] = ants.speed[last];
+            ants.rotationSpeed[index] = ants.rotationSpeed[last];
+            ants.state[index] = ants.state[last];
+            ants.id[index] = ants.id[last];
+            idToIndex.set(ants.id[index], index);  // update the moved ant's mapping
+        }
+        ants.count--;
+        }
+
+        // ============================================================
+        // Sim step — wander steering + edge avoidance + integration
+        // ============================================================
+        const WANDER_STRENGTH = 2.0;   // radians/sec^ (random walk rate on heading velocity)
+        const TURN_SMOOTH = 3.0;       // how fast heading chases wanderTheta target
+        const EDGE_MARGIN = 60;        // px from wall where avoidance kicks in
+        const EDGE_TURN = 2.5;         // radians/sec steer strength near walls
+
+        function simStep(dt) {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+
+            for (let i = 0; i < ants.count; i++) {
+                wander(ants, i, dt);
+                edgeAvoid(ants, i, w, h, EDGE_MARGIN, dt);
+                integrate(ants, i, dt);
+
+                // hard clamp as a safety net (edge avoidance should prevent this triggering)
+                if (ants.x[i] < 0) ants.x[i] = 0;
+                if (ants.x[i] > w) ants.x[i] = w;
+                if (ants.y[i] < 0) ants.y[i] = 0;
+                if (ants.y[i] > h) ants.y[i] = h;
+            }
+        }
+        
+        function wander(ants, i, dt) {
+            const WANDER_STRENGTH = 0.3; // How sharply the ant can turn per tick
+            ants.rotationSpeed[i] += (Math.random() - 0.5) * WANDER_STRENGTH;
+            ants.rotation[i] += ants.rotationSpeed[i] * 0.05 * dt;
+        }
+
+        function edgeAvoid(ants, i, width, height, margin, dt) {
+            if (ants.x[i] < margin) ants.rotation[i] += EDGE_TURN * dt;
+            else if (ants.x[i] > width - margin) ants.rotation[i] -= EDGE_TURN * dt;
+            if (ants.y[i] < margin) ants.rotation[i] += EDGE_TURN * dt;
+            else if (ants.y[i] > height - margin) ants.rotation[i] -= EDGE_TURN * dt;
+        }
+
+        function integrate(ants, i, dt) {
+            ants.x[i] += Math.cos(ants.rotation[i]) * ants.speed[i] * dt;
+            ants.y[i] += Math.sin(ants.rotation[i]) * ants.speed[i] * dt;
+        }
+
+        // ============================================================
+        // Render — draw each ant as a small triangle pointing in heading
+        // ============================================================
+        const ANT_LENGTH = 6;
+        const ANT_WIDTH = 2.5;
+        
+        function render() {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            ctx.clearRect(0, 0, w, h);
+            
+            ctx.fillStyle = '#e8d8b8';
+            for (let i = 0; i < ants.count; i++) {
+                const x = ants.x[i];
+                const y = ants.y[i];
+                const a = ants.rotation[i];
+                const cos = Math.cos(a);
+                const sin = Math.sin(a);
+            
+                // triangle: nose forward, two back corners
+                const noseX = x + cos * ANT_LENGTH;
+                const noseY = y + sin * ANT_LENGTH;
+                const backX = x - cos * ANT_LENGTH * 0.6;
+                const backY = y - sin * ANT_LENGTH * 0.6;
+                const perpX = -sin * ANT_WIDTH;
+                const perpY = cos * ANT_WIDTH;
+            
+                ctx.beginPath();
+                ctx.moveTo(noseX, noseY);
+                ctx.lineTo(backX + perpX, backY + perpY);
+                ctx.lineTo(backX - perpX, backY - perpY);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        // ============================================================
+        // Fixed timestep loop — sim runs at fixed rate, render runs at display rate
+        // ============================================================
+        const SIM_HZ = 60;
+        const SIM_DT = 1 / SIM_HZ;
+        let accumulator = 0;
+        let lastTime = performance.now();
+        
+        function frame(now) {
+            const frameTime = Math.min((now - lastTime) / 1000, 0.25); // clamp on tab-switch stalls
+            lastTime = now;
+            accumulator += frameTime;
+            
+            while (accumulator >= SIM_DT) {
+                simStep(SIM_DT);
+                accumulator -= SIM_DT;
+            }
+            
+            render();
+            requestAnimationFrame(frame);
+        }
+
+        // ============================================================
+        // Init
+        // ============================================================
+        for (let i = 0; i < 80; i++) {
+            spawnAnt(
+                window.innerWidth / 2 + (Math.random() - 0.5) * 100,
+                window.innerHeight / 2 + (Math.random() - 0.5) * 100
+            );
+        }
+        
+        requestAnimationFrame(frame);
+    </script>
+</body>
+</html>
