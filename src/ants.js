@@ -4,6 +4,7 @@
 // needs to reference a specific ant persistently (favorites, names).
 // ============================================================
 import { MAX_ANTS, STATE_IDLE, WALK_FRAME_COUNT } from './config.js';
+import { nest } from './world.js';
 
 export const ants = {
   x: new Float32Array(MAX_ANTS),
@@ -14,6 +15,9 @@ export const ants = {
   state: new Uint8Array(MAX_ANTS),
   stateTimer: new Float32Array(MAX_ANTS),
   animPhase: new Float32Array(MAX_ANTS), // walk-cycle clock, in "frame steps"
+  carrying: new Uint8Array(MAX_ANTS),    // 1 while returning to nest with food, else 0
+  homeVectorX: new Float32Array(MAX_ANTS), // path-integration estimate: (believed) displacement from nest
+  homeVectorY: new Float32Array(MAX_ANTS),
   id: new Uint32Array(MAX_ANTS),
   count: 0,
 };
@@ -32,6 +36,9 @@ export function spawnAnt(x, y) {
   ants.state[i] = STATE_IDLE;
   ants.stateTimer[i] = 0;
   ants.animPhase[i] = Math.random() * WALK_FRAME_COUNT; // random starting frame — avoids synced marching across ants
+  ants.carrying[i] = 0;
+  ants.homeVectorX[i] = x - nest.x; // accurate at spawn — drift only accumulates from movement onward
+  ants.homeVectorY[i] = y - nest.y;
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -52,6 +59,9 @@ export function killAnt(index) {
     ants.state[index] = ants.state[last];
     ants.stateTimer[index] = ants.stateTimer[last];
     ants.animPhase[index] = ants.animPhase[last];
+    ants.carrying[index] = ants.carrying[last];
+    ants.homeVectorX[index] = ants.homeVectorX[last];
+    ants.homeVectorY[index] = ants.homeVectorY[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

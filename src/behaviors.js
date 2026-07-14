@@ -78,7 +78,8 @@ export function edgeAvoid(ants, i, width, height, margin, dt, steerBase, steerUr
   ants.rotation[i] += diff * steerRate * dt;
 }
 
-export function integrate(ants, i, dt) {
-  ants.x[i] += Math.cos(ants.rotation[i]) * ants.speed[i] * dt;
-  ants.y[i] += Math.sin(ants.rotation[i]) * ants.speed[i] * dt;
+export function integrate(ants, i, dt, speedMultiplier = 1) {
+  const speed = ants.speed[i] * speedMultiplier;
+  ants.x[i] += Math.cos(ants.rotation[i]) * speed * dt;
+  ants.y[i] += Math.sin(ants.rotation[i]) * speed * dt;
 }

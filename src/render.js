@@ -3,7 +3,12 @@
 // Reads ant state; never mutates it.
 // ============================================================
 import { ants } from './ants.js';
-import { ANT_LENGTH, WALK_FRAME_COUNT } from './config.js';
+import { nest, food } from './world.js';
+import {
+  ANT_LENGTH, WALK_FRAME_COUNT,
+  SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
+  NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
+} from './config.js';
 
 export const canvas = document.getElementById('canvas');
 export const ctx = canvas.getContext('2d');
@@ -55,6 +60,21 @@ export function resizeCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels, not device pixels
 }
 
+function drawAntShadow(x, y, angle) {
+  // Flat filled ellipse, no blur — cheap by design (see config.js). Offset
+  // stays in fixed world-space Y (constant light direction); the ellipse
+  // itself rotates + elongates with heading, same convention as the sprite
+  // draw (local Y after rotation = the body's long/nose-tail axis).
+  ctx.save();
+  ctx.translate(x, y + SHADOW_OFFSET_Y);
+  ctx.rotate(angle + SPRITE_ANGLE_OFFSET);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, SHADOW_WIDTH, SHADOW_LENGTH, 0, 0, Math.PI * 2);
+  ctx.fillStyle = SHADOW_COLOR;
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawAntFallback(x, y, angle) {
   // Triangle placeholder — used only until frames have loaded, so
   // there's never a blank frame on page load.
@@ -90,16 +110,46 @@ function drawAntSprite(x, y, angle, animPhase) {
   ctx.restore();
 }
 
+function drawWorld() {
+  // nest — simple dirt-mound marker
+  ctx.beginPath();
+  ctx.arc(nest.x, nest.y, NEST_DRAW_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = '#5c4326';
+  ctx.fill();
+
+  // food sources
+  ctx.fillStyle = '#8fd14f';
+  for (const f of food) {
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, FOOD_DRAW_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawCarryIndicator(x, y) {
+  // small morsel marker on top of an ant currently returning with food
+  ctx.beginPath();
+  ctx.arc(x, y, 2, 0, Math.PI * 2);
+  ctx.fillStyle = '#8fd14f';
+  ctx.fill();
+}
+
 export function render() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   ctx.clearRect(0, 0, w, h);
 
+  drawWorld();
+
   for (let i = 0; i < ants.count; i++) {
+    // drawAntShadow(ants.x[i], ants.y[i], ants.rotation[i]); // disabled for now — see config.js for tuning notes if re-enabling
     if (spriteReady) {
       drawAntSprite(ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
     } else {
       drawAntFallback(ants.x[i], ants.y[i], ants.rotation[i]);
+    }
+    if (ants.carrying[i]) {
+      drawCarryIndicator(ants.x[i], ants.y[i]);
     }
   }
 }

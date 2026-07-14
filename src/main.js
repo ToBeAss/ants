@@ -6,10 +6,23 @@
 import { SIM_DT, INITIAL_ANT_COUNT } from './config.js';
 import { spawnAnt } from './ants.js';
 import { simStep } from './sim.js';
-import { resizeCanvas, render } from './render.js';
+import { resizeCanvas, render, canvas } from './render.js';
+import { initWorld, nest, spawnFoodAt } from './world.js';
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+initWorld(window.innerWidth, window.innerHeight);
+
+// Food only ever appears via click — no auto-spawn, no auto-respawn.
+// getBoundingClientRect() converts the click's viewport coordinates into
+// canvas-local coordinates; currently equivalent to world coordinates
+// since there's no camera/pan/zoom yet (see earlier discussion — that's
+// a deliberately deferred feature). Once a camera exists, this is the
+// exact spot that'll need updating to project through it.
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  spawnFoodAt(e.clientX - rect.left, e.clientY - rect.top);
+});
 
 // ============================================================
 // Fixed timestep loop — sim runs at fixed rate, render runs at display rate
@@ -36,8 +49,8 @@ function frame(now) {
 // ============================================================
 for (let i = 0; i < INITIAL_ANT_COUNT; i++) {
   spawnAnt(
-    window.innerWidth / 2 + (Math.random() - 0.5) * 100,
-    window.innerHeight / 2 + (Math.random() - 0.5) * 100
+    nest.x + (Math.random() - 0.5) * 100,
+    nest.y + (Math.random() - 0.5) * 100
   );
 }
 
