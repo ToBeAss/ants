@@ -3,12 +3,12 @@
 // hardcode a tuning value; import it from here instead.
 // ============================================================
 
-export const MAX_ANTS = 500;
-export const INITIAL_ANT_COUNT = 500;    // was 100. Equals MAX_ANTS — no headroom left if anything else
+export const MAX_ANTS = 10000;
+export const INITIAL_ANT_COUNT = 100;    // was 100. Equals MAX_ANTS — no headroom left if anything else
                                           // ever spawns additional ants later
 
 // Sprite
-export const ANT_LENGTH = 5;   // was 9 — smaller ants make the fixed viewport feel like a bigger world
+export const ANT_LENGTH = 6;   // was 9 — smaller ants make the fixed viewport feel like a bigger world
 export const ANT_WIDTH = 2.5;  // currently only used by the brief pre-load triangle fallback
 
 // Shadow — an unblurred ellipse under each ant, rotated to match body
@@ -216,3 +216,8 @@ export const AVOID_HUG_FRACTION = 0.85;  // 0-1 — target closeness once huggin
 // does a plain per-ant linear scan over all obstacles — no spatial grid
 // needed here, unlike ant-ant separation where ant count can be huge.
 export const OBSTACLE_RADIUS = 25;       // px — size of a placed rock
+
+// Colony — shared colony-level resources (colony.js), distinct from
+// world.js's physical environment layout. First consumer: the queen's
+// egg-laying rate, once she exists (see ROADMAP.md Phase C).
+export const FOOD_VALUE_PER_DELIVERY = 1; // added to colony.food per completed dropoff

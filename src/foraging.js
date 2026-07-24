@@ -7,6 +7,7 @@
 // discovery mechanism used to find food in the first place.
 // ============================================================
 import { nearestFood, depleteFood, nest } from './world.js';
+import { addColonyFood } from './colony.js';
 import {
   STATE_WANDER, STATE_FORAGE, STATE_RETURN, STATE_HANDLING,
   SENSE_RADIUS, PICKUP_RADIUS, NEST_RADIUS, NEST_ARRIVE_RADIUS,
@@ -147,5 +148,6 @@ export function updateHandling(ants, i, dt) {
     ants.homeVectorX[i] = 0; // recalibrate — confirmed physically at the nest now
     ants.homeVectorY[i] = 0;
     ants.state[i] = STATE_WANDER;
+    addColonyFood();
   }
 }
