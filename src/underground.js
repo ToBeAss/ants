@@ -23,7 +23,6 @@
 // ============================================================
 import {
   UNDERGROUND_CELL_SIZE,
-  UNDERGROUND_CHAMBER_RADIUS,
   TUNNEL_AVOID_MARGIN,
   TUNNEL_AVOID_STEER_BASE,
   TUNNEL_AVOID_STEER_URGENCY,
@@ -54,12 +53,23 @@ let progress = new Float32Array(0);
 // the top (y=0) of the underground cross-section.
 export const entrance = { x: 0, y: 0 };
 
-// The hand-dug chamber every nest starts with, just below the
-// entrance. Exported so nestPlan.js can register it as the queen
-// chamber and branch the first tunnel off it — this file digs it, but
-// has no opinion about what it's FOR.
-export const startChamber = { x: 0, y: 0, radius: UNDERGROUND_CHAMBER_RADIUS };
+// Depth of a world y, measured from the entrance downward. The single
+// place the underground's vertical convention is expressed: +y is deeper
+// because that's what the canvas does, so depth is just y offset from the
+// entrance. Everything that reasons about depth (nestPlan.js does, a
+// lot) goes through this rather than reading y directly, so flipping the
+// convention later — putting the underground in its own coordinate range
+// so the two domains stop sharing one, see ROADMAP.md — is a change here
+// plus the render transform, not a sweep through the planner.
+export function depthOf(y) {
+  return y - entrance.y;
+}
 
+// Grid only. The SHAPE the nest starts as (a short founding shaft with
+// one small chamber at its bottom) is a planning decision and belongs to
+// nestPlan.js, which carves it via carveDisc() at init — this file used
+// to dig a `startChamber` here and export it, which put "what the nest
+// looks like" in the file that owns "what dirt is."
 export function initUnderground(width, height) {
   cols = Math.ceil(width / UNDERGROUND_CELL_SIZE);
   rows = Math.ceil(height / UNDERGROUND_CELL_SIZE);
@@ -68,11 +78,6 @@ export function initUnderground(width, height) {
 
   entrance.x = nest.x;
   entrance.y = 0;
-
-  startChamber.x = entrance.x;
-  startChamber.y = entrance.y + UNDERGROUND_CHAMBER_RADIUS;
-
-  digCircle(startChamber.x, startChamber.y, startChamber.radius);
 }
 
 function cellIndex(x, y) {
@@ -156,9 +161,11 @@ export function setCellProgress(x, y, t) {
   progress[cellIndex(x, y)] = Math.max(0, Math.min(1, t));
 }
 
-// Carves every cell within `radius` of (cx, cy) — only used internally
-// for the starting chamber at init.
-function digCircle(cx, cy, radius) {
+// Carves every cell within `radius` of (cx, cy) in one go. Used by
+// nestPlan.js to lay in the founding nest at init — the one case where
+// tunnel appears without an ant having dug it. Everything after init
+// goes through digCell(), one slow cell at a time.
+export function carveDisc(cx, cy, radius) {
   const minCol = Math.max(0, Math.floor((cx - radius) / UNDERGROUND_CELL_SIZE));
   const maxCol = Math.min(cols - 1, Math.ceil((cx + radius) / UNDERGROUND_CELL_SIZE));
   const minRow = Math.max(0, Math.floor((cy - radius) / UNDERGROUND_CELL_SIZE));

@@ -9,12 +9,16 @@
 // ============================================================
 import { ants } from './ants.js';
 import { getUndergroundGrid, DIRT } from './underground.js';
-import { getChambers, getActiveProject, PURPOSE_QUEEN, PURPOSE_BROOD, PURPOSE_FOOD } from './nestPlan.js';
+import {
+  getChambers, getActiveProject, getQueenChamber, purposeOf,
+  PURPOSE_ATRIUM, PURPOSE_BROOD, PURPOSE_FOOD,
+} from './nestPlan.js';
 import { drawAnt } from './antSprite.js';
 import {
   DOMAIN_UNDERGROUND,
   UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR, ENTRANCE_COLOR,
-  CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD, PLAN_COLOR,
+  CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD,
+  CHAMBER_COLOR_ATRIUM, PLAN_COLOR,
 } from './config.js';
 
 // Parsed once from the palette above, for the carve-progress blend —
@@ -36,10 +40,15 @@ const TUNNEL_RGB = rgbOf(UNDERGROUND_TUNNEL_COLOR);
 // JOBS (the thing that separates ant-keeping from watching ants), while
 // leaving the excavation itself the visually dominant thing.
 const CHAMBER_STYLE = {
-  [PURPOSE_QUEEN]: { color: CHAMBER_COLOR_QUEEN, label: 'queen' },
-  [PURPOSE_BROOD]: { color: CHAMBER_COLOR_BROOD, label: 'brood' },
+  [PURPOSE_ATRIUM]: { color: CHAMBER_COLOR_ATRIUM, label: 'atrium' },
   [PURPOSE_FOOD]: { color: CHAMBER_COLOR_FOOD, label: 'stores' },
+  [PURPOSE_BROOD]: { color: CHAMBER_COLOR_BROOD, label: 'brood' },
 };
+// The queen's chamber is a position, not a purpose — the deepest one (see
+// nestPlan.js). Annotating it distinctly is what makes the nest's vertical
+// order legible at a glance: foragers unloading in the big rooms at the
+// top, stores in the middle, the queen at the bottom of the shaft.
+const QUEEN_STYLE = { color: CHAMBER_COLOR_QUEEN, label: 'queen' };
 const CHAMBER_RING_INSET = 2; // px — keeps the ring on carved floor rather than straddling the dirt boundary,
                               // where a dark ring would half-vanish into the dark earth
 
@@ -86,8 +95,11 @@ export function drawUnderground(ctx) {
   ctx.lineWidth = 1.5;
   ctx.font = '10px sans-serif';
   ctx.textAlign = 'center';
+  const queenChamber = getQueenChamber();
   for (const c of getChambers()) {
-    const style = CHAMBER_STYLE[c.purpose];
+    // purposeOf(), not a stored field — a room's job is derived from its
+    // depth and changes as the nest deepens under it (see nestPlan.js).
+    const style = c === queenChamber ? QUEEN_STYLE : CHAMBER_STYLE[purposeOf(c)];
     if (!style) continue;
     ctx.beginPath();
     ctx.arc(c.x, c.y, Math.max(1, c.radius - CHAMBER_RING_INSET), 0, Math.PI * 2);
@@ -110,12 +122,18 @@ export function drawUnderground(ctx) {
     ctx.setLineDash([3, 5]);
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.arc(project.x, project.y, project.radius, 0, Math.PI * 2);
-    ctx.stroke();
+    // A chamber project also outlines the room to come; a shaft extension
+    // is just the dashed line above, heading off into undug earth — which
+    // is the right read for it, since the colony is deepening rather than
+    // building a room yet (see nestPlan.js).
+    const style = CHAMBER_STYLE[project.purpose];
+    if (style) {
+      ctx.beginPath();
+      ctx.arc(project.x, project.y, project.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
 
-    const style = CHAMBER_STYLE[project.purpose];
     if (style) {
       ctx.fillStyle = PLAN_COLOR;
       ctx.fillText(style.label, project.x, project.y + 3);

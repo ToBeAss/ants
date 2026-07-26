@@ -28,12 +28,13 @@ import { OBSTACLE_RADIUS } from './config.js';
 // linkage"). nest itself doesn't reposition on resize (same accepted
 // limitation as world.js), so re-reading it here is just re-deriving
 // the entrance from whatever nest.x already is, not moving it.
-// initNestPlan() must follow initUnderground() in both places — it
-// registers the starting chamber as the queen chamber and branches the
-// first tunnel off it, so it reads state initUnderground() just set.
-// On resize the dug grid resets, so the plan (chambers dug, project in
-// progress) has to reset with it or it would describe tunnels that no
-// longer exist.
+// initNestPlan() must follow initUnderground() in both places — it lays
+// in the founding nest (a short shaft down from the entrance with one
+// small chamber at its bottom, see nestPlan.js), so it both reads the
+// entrance initUnderground() just derived and carves into the grid it
+// just allocated. On resize the dug grid resets, so the plan (shaft,
+// chambers dug, project in progress) has to reset with it or it would
+// describe tunnels that no longer exist.
 window.addEventListener('resize', () => {
   resizeCanvas();
   initPheromones(window.innerWidth, window.innerHeight);

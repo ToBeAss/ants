@@ -78,9 +78,13 @@ export const ENTRANCE_COLOR = '#8c5a14';  // the one point linking the views; da
 // pale (#e8d8b8), which is near-invisible against either view's ground.
 export const ANT_FALLBACK_COLOR = '#141210';
 
-export const CHAMBER_COLOR_QUEEN = 'rgba(150, 84, 8, 0.8)';
+export const CHAMBER_COLOR_QUEEN = 'rgba(150, 84, 8, 0.8)';   // not a purpose of its own any more — the
+                                                               // deepest chamber IS the queen's (see nestPlan.js),
+                                                               // so this annotates whichever brood chamber
+                                                               // currently sits at the bottom
 export const CHAMBER_COLOR_BROOD = 'rgba(32, 78, 138, 0.75)';
 export const CHAMBER_COLOR_FOOD = 'rgba(38, 104, 46, 0.75)';
+export const CHAMBER_COLOR_ATRIUM = 'rgba(120, 72, 24, 0.75)'; // the big shallow rooms just under the entrance
 export const PLAN_COLOR = 'rgba(255, 240, 210, 0.45)';
 
 // Walk-cycle animation
@@ -290,10 +294,6 @@ export const FOOD_VALUE_PER_DELIVERY = 1; // added to colony.food per completed 
 // to be cheap, fine enough that a dug chamber/tunnel reads as a shape
 // rather than a single giant block.
 export const UNDERGROUND_CELL_SIZE = 8;                // px — world-space size of one grid cell
-export const UNDERGROUND_CHAMBER_RADIUS = 40;          // px — initial hand-dug starting chamber at the entrance,
-                                                         // so the queen (Phase C) and first brood (Phase D) have
-                                                         // somewhere to be before any digging happens. Doubles as
-                                                         // the queen chamber's radius in the nest plan (nestPlan.js)
 // The diggable area is deliberately NOT capped any more (decided
 // 2026-07-26). It used to be an unlocked-region circle around the
 // starting chamber (AntsCanada "test tube" containment framing, see
@@ -369,31 +369,125 @@ export const DIG_EXIT_TIMEOUT = 45;      // seconds — backstop on the walk bac
                                           // same spirit as sim.js's hard position clamps
 
 // Nest planning (nestPlan.js) — the colony decides WHAT to excavate and
-// WHEN, and diggers carry out that plan. Chambers exist for a purpose
-// (queen, brood, food store) and are only dug once the colony actually
-// needs one: a nest that expands ahead of demand is wasted work and, in
-// real ant-keeping terms, extra tunnel exposed to predators for no gain.
-export const CHAMBER_RADIUS_BROOD = 34;  // px — brood chambers are the big ones; brood is bulky and tended
-export const CHAMBER_RADIUS_FOOD = 26;   // px — food stores are smaller
-export const ANTS_PER_BROOD_CHAMBER = 60; // colony size each brood chamber supports. The STARTING chamber covers
-                                          // the first generation, so the count is floor(pop / this) — the first
-                                          // dedicated brood chamber isn't dug until the colony has outgrown home.
-                                          // Population stands in for brood count until brood exists (Phase C/D),
-                                          // at which point this rule reads the brood array instead.
-export const FOOD_PER_STORAGE_CHAMBER = 50; // colony.food each storage chamber holds — deliveries accumulating
-                                          // past this is what triggers digging the next one
+// WHEN, and diggers carry out that plan. Chambers exist for a purpose and
+// are only dug once the colony actually needs one: a nest that expands
+// ahead of demand is wasted work and, in real ant-keeping terms, extra
+// tunnel exposed to predators for no gain.
+//
+// Reworked 2026-07-26 (ROADMAP.md Phase B2) around the one thing real
+// nest architecture is organized by: DEPTH. Chambers hang off a single
+// mostly-vertical shaft, and how deep a chamber is decides how big it is
+// and who lives in it. What this replaced — chambers branching off a
+// randomly chosen existing chamber, with radius keyed to purpose — grew
+// a spreading bush and put the queen in the shallowest room, which is
+// backwards on both counts.
+
+// --- The shaft ---
+// Real shafts descend at 20-30 degrees from horizontal near the surface,
+// steepening to 45-60 degrees deeper down, wandering in a loose helix
+// (~4-6cm across in P. badius). These angles are measured ALONG that
+// helix; this project only digs in the single plane visible against the
+// glass, so what's modeled here is the helix's apparent descent in
+// cross-section — steeper than the path angle, and read as a zig-zag
+// rather than a spiral. Same "against the glass" simplification the
+// underground view is built on.
+export const SHAFT_SEGMENT_LENGTH = 55;  // px — one zig or zag of the descent
+export const SHAFT_ANGLE_SHALLOW = 0.85; // rad from vertical (~49 deg) near the surface — a shallow, spreading
+                                          // descent, which is also what spreads the big top chambers out
+                                          // laterally rather than stacking them
+export const SHAFT_ANGLE_DEEP = 0.35;    // rad from vertical (~20 deg) once deep — near-vertical, chambers stack
+export const SHAFT_STEEPEN_DEPTH = 200;  // px of depth over which the angle interpolates shallow -> deep
+export const SHAFT_ANGLE_WANDER = 0.22;  // rad — jitter per segment, so the descent isn't a mechanical zig-zag
+export const SHAFT_INITIAL_DEPTH = 110;  // px — depth of the founding nest, dug before the sim starts. Real
+                                          // incipient nests are already ~30cm deep against a mature 2.5-3m, so
+                                          // the colony starts underground, not scratching at the surface.
+export const SHAFT_MARGIN = 20;          // px — keep the shaft (and chambers) this far off the grid edges
+// How deep the nest is ALLOWED to get, as a function of worker population.
+// Measured nests are strikingly reluctant to deepen: every 10-fold
+// increase in workers buys only ~2.4x the depth, while total chamber area
+// grows ~7.5x. So a growing colony gets its space mostly from more and
+// bigger rooms, not a longer shaft — and without this cap it doesn't:
+// demand for brood chambers (which have to sit in the bottom third) drove
+// the shaft straight to the bottom of the world at three times the
+// population that should have reached it.
+export const NEST_DEPTH_ALLOMETRY = 0.38;      // log10(2.4) — the measured exponent
+export const NEST_DEPTH_REFERENCE_POP = 100;   // population SHAFT_INITIAL_DEPTH corresponds to
+
+// --- Chambers hang off the shaft ---
+export const CHAMBER_STUB_LENGTH = 14;   // px — the short lateral neck from shaft to chamber. Short by
+                                          // construction, which is what retires the old "a long corridor can cut
+                                          // across older tunnels" problem: nothing long is ever dug between rooms.
+export const CHAMBER_RADIUS_SHALLOW = 50; // px — chamber radius just under the surface
+export const CHAMBER_RADIUS_DEEP = 22;   // px — chamber radius at the bottom of the nest. Radius decays
+                                          // geometrically between the two, giving shallow chambers ~5x the AREA of
+                                          // deep ones — the measured ratio is 5-6x, and roughly half of all
+                                          // chamber area sitting in the top quarter falls out of this plus the
+                                          // depth bands below.
+export const CHAMBER_STUNT_LIMIT = 0.75; // 0-1 — reject a site where the surface overhead forces a room below
+                                          // this fraction of the size its depth calls for. A colony waits for the
+                                          // nest to deepen rather than settling for a token room, which is why an
+                                          // incipient nest has no big top chambers: without this, two stunted
+                                          // 17px "atriums" got dug 40px down and permanently occupied the spot
+                                          // where the real ones belonged.
+// Chamber enlargement. Real nests grow by deepening, adding rooms AND
+// widening the rooms they already have, simultaneously — and widening
+// contributes the MOST of the three. It's also the only way a room dug
+// early (small, because it was the deep one at the time) can become the
+// big shallow room it now sits at the depth of: without it every chamber
+// keeps the size it was dug at, and a mature nest came out with shallow
+// rooms only ~1.7x the area of deep ones instead of the measured 5-6x.
+export const CHAMBER_ENLARGE_STEP = 8;   // px of radius per widening project — incremental, so a room grows
+                                          // visibly over several rounds rather than jumping to size
+export const CHAMBER_ENLARGE_MIN_GAIN = 5; // px — don't open a project to gain less than this
+export const FOUNDING_CHAMBER_RADIUS = 26; // px — the single small room at the bottom of the founding shaft. The
+                                          // queen and her first brood share one cramped chamber in reality; the
+                                          // big rooms come later, as the nest deepens.
+
+// Depth bands, as fractions of the shaft's CURRENT depth — so the nest
+// keeps its proportions as it deepens, matching the finding that the
+// size-free shape of a nest doesn't change as the colony grows. A
+// chamber already dug stays put, so its band position drifts shallower
+// over the colony's life; that's why top-heaviness is a distribution
+// rather than a property of any one room.
+export const BAND_ATRIUM_MIN = 0.08;     // atrium: the big shallow rooms where returning foragers unload
+export const BAND_ATRIUM_MAX = 0.26;
+export const BAND_FOOD_MIN = 0.36;       // stores: real harvester ants keep seeds in a strictly MIDDLE band
+export const BAND_FOOD_MAX = 0.62;       // (40-100cm of a 2-3m nest) — never at the top, never at the bottom
+export const BAND_BROOD_MIN = 0.68;      // brood, nurses, callows and the queen: the bottom third
+export const BAND_BROOD_MAX = 1.0;
+
+// --- Demand ---
+// Demand is for chamber AREA per stratum, not a count of rooms. Counting
+// rooms had two fatal problems: a demand of "15 brood chambers" is
+// geometrically impossible in a bounded world, so the colony either dug
+// to the floor chasing it or stalled forever; and widening an existing
+// room satisfied no demand at all, which made enlargement — the dominant
+// growth mode in real nests — dead code. Area fixes both, and it's what
+// the colony actually needs. (Partly anticipates ROADMAP.md Phase B4's
+// move from arbitrary counters to space adequacy.)
+export const BROOD_AREA_PER_ANT = 26;    // px^2 of brood chamber the colony wants per worker. The founding
+                                          // chamber is worth ~80 workers, so the starting colony has genuinely
+                                          // outgrown it. Population stands in for brood count until brood exists
+                                          // (Phase C/D), at which point this reads the brood array instead.
+export const ATRIUM_AREA_PER_ANT = 30;   // px^2 per worker. The largest per-ant appetite of the three, which is
+                                          // what makes total chamber area come out top-heavy the way measured
+                                          // nests are (~half of all area in the top quarter)
+export const STORE_AREA_PER_FOOD = 12;   // px^2 of store chamber per unit of colony.food held
 export const NEST_PROJECT_COOLDOWN = 25; // seconds of quiet after finishing a project before the colony will
                                           // open another, even if demand is already there — keeps expansion
                                           // paced and deliberate rather than one continuous excavation
-export const NEST_TUNNEL_LENGTH_MIN = 45; // px — how far a new chamber sits from the one it branches off
-export const NEST_TUNNEL_LENGTH_MAX = 110;
-export const NEST_TUNNEL_RADIUS = 10;    // px — corridor half-width. Must exceed UNDERGROUND_CELL_SIZE/2 by a
+
+// --- Layout mechanics ---
+export const NEST_TUNNEL_RADIUS = 10;    // px — shaft/stub half-width. Must exceed UNDERGROUND_CELL_SIZE/2 by a
                                           // real margin: a one-cell-wide corridor puts dirt within
                                           // TUNNEL_AVOID_MARGIN on BOTH sides, whose push vectors cancel (see
                                           // avoidTunnelWalls) and leave an ant steering blind down it.
-export const NEST_CHAMBER_CLEARANCE = 18; // px — minimum dirt left between two chambers' edges, so the nest
-                                          // reads as distinct rooms rather than one merged cavity
-export const NEST_SITE_ANGLE_SPREAD = 1.2; // rad — half-spread around straight down. Nests grow downward and
-                                          // outward, not upward toward the surface.
-export const NEST_SITE_ATTEMPTS = 60;    // random candidate sites tried before giving up this tick (a failure
-                                          // just means no project opens yet — it retries next tick)
+export const NEST_CHAMBER_CLEARANCE_SHALLOW = 14; // px — dirt left between chamber edges near the surface
+export const NEST_CHAMBER_CLEARANCE_DEEP = 34;    // px — and deep down. Spacing WIDENS with depth in real nests
+                                          // (2-4cm near the surface to 20-30cm deep), which is the opposite of
+                                          // what a single flat clearance value produces.
+export const NEST_SITE_ATTEMPTS = 60;    // candidate attachment points tried along the band before giving up on
+                                          // placing this chamber. Failing isn't an error: it means the band has
+                                          // no room yet, and the colony deepens the shaft instead (see
+                                          // nestPlan.js) — which grows every band's absolute room and is how the
+                                          // nest gets deep enough for the big top chambers in the first place.
