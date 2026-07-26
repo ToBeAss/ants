@@ -10,12 +10,13 @@ import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandli
 import { checkDigRecruitment, updateDigging } from './digging.js';
 import { updateStoring } from './provisioning.js';
 import { updateNestPlan } from './nestPlan.js';
+import { updateQueen } from './queen.js';
 import { avoidTunnelWalls, pushOutOfDirt } from './underground.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
 import { rebuildSpatialGrid } from './spatialGrid.js';
 import { obstacles } from './world.js';
 import {
-  ANT_LENGTH,
+  ANT_LENGTH, SIM_SPEEDS,
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
   DIG_TWITCH_CHANCE, DIG_TWITCH_AMOUNT,
   WALK_ANIM_FPS,
@@ -24,6 +25,23 @@ import {
   FORAGE_SPEED_MULT, RETURN_SPEED_MULT,
   DOMAIN_UNDERGROUND, ENTRANCE_EXIT_OVERSHOOT,
 } from './config.js';
+
+// How many times faster than real time the simulation is being run. Lives
+// here rather than in main.js because it's a property of the simulation,
+// not of the loop that drives it — main.js reads it to decide how much time
+// to feed the accumulator, render.js reads it to label the view. Neither
+// imports the other, which keeps the two draw/loop paths independent.
+let speedIndex = 0;
+
+export function getSimSpeed() {
+  return SIM_SPEEDS[speedIndex];
+}
+
+// Cycles and wraps back to 1x, same shape as the other single-key toggles.
+export function cycleSimSpeed() {
+  speedIndex = (speedIndex + 1) % SIM_SPEEDS.length;
+  return getSimSpeed();
+}
 
 export function simStep(dt) {
   const w = window.innerWidth;
@@ -34,6 +52,8 @@ export function simStep(dt) {
   rebuildSpatialGrid(ants); // ditto — bins every ant fresh, used by separationSteer below
   updateNestPlan(dt); // ditto — colony-level, not per-ant: decides whether the nest currently needs a new
                       // chamber dug, and retires a project once its last cell is open (see nestPlan.js)
+  updateQueen(dt); // ditto — she's one entity, not part of the ant store: lays eggs against the food the
+                   // colony has actually got underground, and walks down if the nest deepens past her
 
   for (let i = 0; i < ants.count; i++) {
     const state = ants.state[i];

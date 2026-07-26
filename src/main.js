@@ -5,12 +5,13 @@
 // ============================================================
 import { SIM_DT, INITIAL_ANT_COUNT } from './config.js';
 import { spawnAnt } from './ants.js';
-import { simStep } from './sim.js';
+import { simStep, getSimSpeed, cycleSimSpeed } from './sim.js';
 import { resizeCanvas, render, canvas, toggleTrailVisibility, toggleView, getCurrentView } from './render.js';
 import { initWorld, nest, spawnFoodAt, addObstacle } from './world.js';
 import { initPheromones } from './pheromones.js';
 import { initUnderground } from './underground.js';
 import { initNestPlan } from './nestPlan.js';
+import { initQueen } from './queen.js';
 import { initSpoil } from './spoil.js';
 import { OBSTACLE_RADIUS } from './config.js';
 
@@ -36,11 +37,16 @@ import { OBSTACLE_RADIUS } from './config.js';
 // just allocated. On resize the dug grid resets, so the plan (shaft,
 // chambers dug, project in progress) has to reset with it or it would
 // describe tunnels that no longer exist.
+// initQueen() must follow initNestPlan() in both places for the same
+// reason: it seats the queen in the deepest chamber, which has to exist
+// before she can be put in it, and it clears the brood — eggs are
+// positions inside chambers, so a rebuilt nest can't keep the old ones.
 window.addEventListener('resize', () => {
   resizeCanvas();
   initPheromones(window.innerWidth, window.innerHeight);
   initUnderground(window.innerWidth, window.innerHeight);
   initNestPlan();
+  initQueen();
   initSpoil(window.innerWidth, window.innerHeight);
 });
 resizeCanvas();
@@ -48,6 +54,7 @@ initWorld(window.innerWidth, window.innerHeight);
 initPheromones(window.innerWidth, window.innerHeight);
 initUnderground(window.innerWidth, window.innerHeight);
 initNestPlan();
+initQueen();
 // initSpoil() needs the viewport because the nest sits in a corner: half the
 // crater's directions point off-world and have to be excluded when choosing
 // where to dump. Reset alongside the dug grid on resize — a mound whose
@@ -89,11 +96,18 @@ canvas.addEventListener('click', (e) => {
 // 'V' toggles between the surface and underground views (ROADMAP.md
 // Phase B) — also purely a rendering switch; the simulation underneath
 // keeps running in both views regardless of which one is on screen.
+// 'F' cycles the fast-forward speed (1x -> 2x -> ... -> 1x). Unlike the
+// two above this is NOT purely visual — it really does run the colony
+// faster — but it changes nothing about how the colony behaves: the sim is
+// fixed-timestep, so this only alters how many identical SIM_DT steps get
+// run per frame (see config.js's SIM_SPEEDS).
 window.addEventListener('keydown', (e) => {
   if (e.key === 't' || e.key === 'T') {
     toggleTrailVisibility();
   } else if (e.key === 'v' || e.key === 'V') {
     toggleView();
+  } else if (e.key === 'f' || e.key === 'F') {
+    cycleSimSpeed();
   }
 });
 
@@ -104,7 +118,16 @@ let accumulator = 0;
 let lastTime = performance.now();
 
 function frame(now) {
-  const frameTime = Math.min((now - lastTime) / 1000, 0.25); // clamp on tab-switch stalls
+  // Clamp FIRST, scale second. The clamp is there to stop a tab-switch
+  // stall dumping a minute of real time into the accumulator; applying the
+  // speed multiplier before it would let 16x turn that same stall into 16
+  // simulated minutes in one frame.
+  //
+  // The clamp is also what makes fast-forward safe on a machine that can't
+  // keep up: at most 0.25 * speed simulated seconds are ever queued per
+  // frame, so the loop falls behind real time gracefully instead of the
+  // accumulator running away.
+  const frameTime = Math.min((now - lastTime) / 1000, 0.25) * getSimSpeed();
   lastTime = now;
   accumulator += frameTime;
 

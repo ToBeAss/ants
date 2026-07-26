@@ -8,6 +8,7 @@
 // eventual dual-screen setup (see ROADMAP.md).
 // ============================================================
 import { ants } from './ants.js';
+import { queen, brood } from './colony.js';
 import { getUndergroundGrid, DIRT } from './underground.js';
 import {
   getChambers, getActiveProject, getQueenChamber, purposeOf,
@@ -15,10 +16,11 @@ import {
 } from './nestPlan.js';
 import { drawAnt, drawCarryIndicator } from './antSprite.js';
 import {
-  DOMAIN_UNDERGROUND,
+  ANT_LENGTH, DOMAIN_UNDERGROUND,
   UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR,
   CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD,
   CHAMBER_COLOR_ATRIUM, PLAN_COLOR, SOIL_MARKER_COLOR, FOOD_COLOR, CARRY_MARKER_COLOR,
+  QUEEN_MARK_COLOR, QUEEN_SPRITE_SCALE, BROOD_EGG_COLOR, BROOD_EGG_EDGE_COLOR, BROOD_EGG_RADIUS,
 } from './config.js';
 
 // Parsed once from the palette above, for the carve-progress blend —
@@ -127,6 +129,23 @@ export function drawUnderground(ctx) {
     }
   }
 
+  // Brood, drawn from the array itself rather than from a per-chamber
+  // count: each egg is a real object at a real position (colony.js), so
+  // the pile you see is the pile that exists — including, later, brood
+  // scattered across several nursery rooms at once.
+  if (brood.length > 0) {
+    ctx.fillStyle = BROOD_EGG_COLOR;
+    ctx.strokeStyle = BROOD_EGG_EDGE_COLOR;
+    ctx.lineWidth = 0.6;
+    for (const b of brood) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, BROOD_EGG_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1.5;
+  }
+
   // The chamber under construction, dashed — you can see where the
   // colony has decided to expand to before they've got there, which is
   // most of what makes the digging read as deliberate rather than
@@ -163,6 +182,17 @@ export function drawUnderground(ctx) {
   // out — it's the one tunnel that reaches the top edge, and ants visibly
   // walk up through it and off the picture. A dot on top of it only drew
   // attention to a point where nothing happens.
+
+  // The queen, under the workers so a passing ant reads as passing OVER
+  // her rather than her sitting on top of the colony. Same silhouette as
+  // everyone else, just larger (see drawAnt's scale) — the ring on the
+  // floor is what says "this one is the queen" without recolouring a
+  // sprite that can't be recoloured.
+  ctx.beginPath();
+  ctx.arc(queen.x, queen.y, ANT_LENGTH * QUEEN_SPRITE_SCALE * 1.25, 0, Math.PI * 2);
+  ctx.strokeStyle = QUEEN_MARK_COLOR;
+  ctx.stroke();
+  drawAnt(ctx, queen.x, queen.y, queen.rotation, queen.animPhase, QUEEN_SPRITE_SCALE);
 
   // Underground-dwelling ants — same drawAnt() as the surface view
   // (antSprite.js), so an ant looks identical whether it's above or

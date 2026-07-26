@@ -97,6 +97,19 @@ export const CHAMBER_COLOR_FOOD = 'rgba(38, 104, 46, 0.75)';
 export const CHAMBER_COLOR_ATRIUM = 'rgba(120, 72, 24, 0.75)'; // the big shallow rooms just under the entrance
 export const PLAN_COLOR = 'rgba(255, 240, 210, 0.45)';
 
+// The queen and the brood (colony.js/queen.js), drawn in the underground
+// view. The queen is the SAME black silhouette as a worker, only bigger —
+// the palette constraint above applies to her too, so what marks her out is
+// size and a ring on the floor, not a recoloured sprite.
+export const QUEEN_MARK_COLOR = 'rgba(150, 84, 8, 0.5)'; // the ring she sits on, same amber as her chamber's
+                                           // annotation, so "the queen" and "the queen's chamber" read as
+                                           // one thing
+// Eggs are pearly white in reality, but the gallery floor is light here
+// too (see UNDERGROUND_TUNNEL_COLOR), so a white pile alone would wash
+// out — hence a rim as well as a fill.
+export const BROOD_EGG_COLOR = '#fdf8ec';
+export const BROOD_EGG_EDGE_COLOR = 'rgba(112, 82, 46, 0.45)';
+
 // Walk-cycle animation
 export const WALK_FRAME_COUNT = 6;   // frames extracted from the source sheet
 export const WALK_ANIM_FPS = 14;     // frame-steps/sec at baseline (WANDER) speed — cadence of the leg
@@ -185,6 +198,21 @@ export const SEPARATION_STEER_RATE = 1.2;   // rad/sec — was 3.0, comparable i
 // Sim rate
 export const SIM_HZ = 60;
 export const SIM_DT = 1 / SIM_HZ;
+
+// Time controls ('F' cycles; state in sim.js, applied in main.js's loop).
+// Speeding up runs MORE fixed SIM_DT steps per frame — it never changes the
+// step itself, so the colony behaves identically to a run left going at 1x
+// for the same simulated duration. That's only true because the sim is
+// fixed-timestep: any dt-dependent shortcut would make these two disagree,
+// which is one more reason not to introduce one (see CLAUDE.md on
+// tick-rate independence).
+//
+// Worth having because the interesting things here happen on an ambient
+// timescale: a chamber is minutes of digging, and the nursery filling
+// enough to make the colony deepen the nest is the better part of an hour.
+export const SIM_SPEEDS = [1, 2, 4, 8, 16];
+export const SPEED_LABEL_COLOR = 'rgba(20, 18, 16, 0.5)'; // dark: it's drawn on light ground in BOTH views
+export const SPEED_LABEL_MARGIN = 10; // px in from the top-left corner
 
 // States
 export const STATE_IDLE = 0;
@@ -620,10 +648,13 @@ export const BAND_BROOD_MAX = 1.0;
 // growth mode in real nests — dead code. Area fixes both, and it's what
 // the colony actually needs. (Partly anticipates ROADMAP.md Phase B4's
 // move from arbitrary counters to space adequacy.)
-export const BROOD_AREA_PER_ANT = 26;    // px^2 of brood chamber the colony wants per worker. The founding
-                                          // chamber is worth ~80 workers, so the starting colony has genuinely
-                                          // outgrown it. Population stands in for brood count until brood exists
-                                          // (Phase C/D), at which point this reads the brood array instead.
+export const BROOD_AREA_PER_BROOD = 26;  // px^2 of brood chamber the colony wants per item of brood. Was
+                                          // per WORKER, standing in for a brood count that didn't exist yet;
+                                          // Phase C made brood real, so the rule now reads what it always
+                                          // meant to. Deliberately LARGER than BROOD_PACK_AREA below: a
+                                          // nursery packed to capacity has to still generate demand for more
+                                          // nursery, or the queen stops laying the moment her room fills and
+                                          // the colony never digs its way out of it.
 export const ATRIUM_AREA_PER_ANT = 30;   // px^2 per worker. The largest per-ant appetite of the three, which is
                                           // what makes total chamber area come out top-heavy the way measured
                                           // nests are (~half of all area in the top quarter)
@@ -646,3 +677,45 @@ export const NEST_SITE_ATTEMPTS = 60;    // candidate attachment points tried al
                                           // no room yet, and the colony deepens the shaft instead (see
                                           // nestPlan.js) — which grows every band's absolute room and is how the
                                           // nest gets deep enough for the big top chambers in the first place.
+
+// ============================================================
+// The queen and the brood (colony.js holds them, queen.js drives them)
+// ROADMAP.md Phase C.
+//
+// This is the first thing in the sim that SPENDS food. Until it existed
+// colony.food only ever went up, which made storage demand unbounded and
+// turned the deepest chamber into a larder that grew forever. A queen
+// converting food into eggs closes that loop the way the colony actually
+// does, rather than by capping a counter.
+// ============================================================
+export const QUEEN_SPRITE_SCALE = 1.7;   // x a worker's drawn size. Real queens are several times a worker's
+                                          // mass and visibly barely fit their own tunnels; 1.7 is as far as
+                                          // that can go here before she is wider than the 2*NEST_TUNNEL_RADIUS
+                                          // shaft she has to walk down.
+export const QUEEN_SPEED = 14;           // px/sec — under a third of a worker's 40-55 (ants.js). She only ever
+                                          // walks when the colony digs a chamber deeper than hers (queen.js),
+                                          // so this is the pace of a relocation, not of a commute.
+export const QUEEN_STEER_RATE = 2.0;     // rad/sec — slower than SEEK_STEER_RATE (3.5); she is ponderous
+export const QUEEN_SETTLE_RADIUS = 6;    // px from her chamber's centre that counts as home, so she comes to
+                                          // rest instead of hunting for an exact point
+export const QUEEN_TWITCH_CHANCE = 1.2;  // per second — much rarer than IDLE_TWITCH_CHANCE (4.5). She is
+export const QUEEN_TWITCH_AMOUNT = 0.25; // radians — still, but not frozen: the same reasoning that gives
+                                          // carving diggers a twitch (see CLAUDE.md), applied to the one
+                                          // entity that never moves at all.
+
+export const QUEEN_LAY_INTERVAL_MIN = 25; // seconds between eggs when food allows. Ambient timescale, matching
+export const QUEEN_LAY_INTERVAL_MAX = 45; // excavation's — a clutch is something you notice having happened,
+                                          // not something you watch.
+export const QUEEN_LAY_RETRY = 6;        // seconds before trying again after a lay that couldn't happen (no
+                                          // food, or no room). Short enough that she resumes promptly once the
+                                          // player feeds the colony, long enough not to re-check every tick.
+export const QUEEN_EGG_FOOD_COST = 2;    // units of food per egg — two forager loads. THE stewardship pressure
+                                          // the project's vision asks for: no food reserve, no eggs, and the
+                                          // only source of food is the player.
+export const BROOD_PACK_AREA = 16;       // px^2 of brood-chamber floor one item of brood occupies. Sets how
+                                          // much brood the nest can hold at all; the founding chamber is worth
+                                          // ~130. See BROOD_AREA_PER_BROOD for why the two differ.
+export const BROOD_EGG_RADIUS = 2.0;     // px — drawn size of one egg. Every item of brood is drawn, with no
+                                          // cap: unlike a chamber's food (a number, hence the 40-morsel
+                                          // stand-in the renderer draws for it), each egg is a real object
+                                          // with a real position, and the pile should be as big as it is.

@@ -7,6 +7,7 @@ import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
 import { getSpoil, rimRadiusAt } from './spoil.js';
 import { drawUnderground } from './undergroundRender.js';
+import { getSimSpeed } from './sim.js';
 import { drawAnt, drawCarryIndicator, SPRITE_ANGLE_OFFSET } from './antSprite.js';
 import {
   SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
@@ -15,6 +16,7 @@ import {
   DOMAIN_SURFACE,
   GROUND_COLOR, NEST_COLOR, FOOD_COLOR, OBSTACLE_COLOR, CARRY_MARKER_COLOR,
   SOIL_MARKER_COLOR, SPOIL_COLOR,
+  SPEED_LABEL_COLOR, SPEED_LABEL_MARGIN,
 } from './config.js';
 
 export const canvas = document.getElementById('canvas');
@@ -204,5 +206,19 @@ export function render() {
     drawUnderground(ctx);
   } else {
     drawSurface();
+  }
+
+  // Fast-forward indicator, in both views. Drawn only when it's on: at 1x
+  // there's nothing to say, and an always-on readout would be the first
+  // piece of permanent UI on a screen whose whole point is that it looks
+  // like a terrarium rather than a program. When it IS on, the colony is
+  // genuinely running faster than real time and that should never be a
+  // silent mode.
+  const speed = getSimSpeed();
+  if (speed !== 1) {
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'start';
+    ctx.fillStyle = SPEED_LABEL_COLOR;
+    ctx.fillText(`${speed}x`, SPEED_LABEL_MARGIN, SPEED_LABEL_MARGIN + 12);
   }
 }

@@ -35,17 +35,19 @@ walkFrames[0].addEventListener('load', () => {
   spriteDrawWidth = SPRITE_DRAW_HEIGHT * (walkFrames[0].naturalWidth / walkFrames[0].naturalHeight);
 });
 
-function drawFallback(ctx, x, y, angle) {
+function drawFallback(ctx, x, y, angle, scale) {
   // Triangle placeholder — used only until frames have loaded, so
   // there's never a blank frame on page load.
+  const len = ANT_LENGTH * scale;
+  const wid = ANT_WIDTH * scale;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
-  const noseX = x + cos * ANT_LENGTH;
-  const noseY = y + sin * ANT_LENGTH;
-  const backX = x - cos * ANT_LENGTH * 0.6;
-  const backY = y - sin * ANT_LENGTH * 0.6;
-  const perpX = -sin * ANT_WIDTH;
-  const perpY = cos * ANT_WIDTH;
+  const noseX = x + cos * len;
+  const noseY = y + sin * len;
+  const backX = x - cos * len * 0.6;
+  const backY = y - sin * len * 0.6;
+  const perpX = -sin * wid;
+  const perpY = cos * wid;
 
   ctx.fillStyle = ANT_FALLBACK_COLOR;
   ctx.beginPath();
@@ -56,27 +58,30 @@ function drawFallback(ctx, x, y, angle) {
   ctx.fill();
 }
 
-function drawSprite(ctx, x, y, angle, animPhase) {
+function drawSprite(ctx, x, y, angle, animPhase, scale) {
   const frame = walkFrames[Math.floor(animPhase) % WALK_FRAME_COUNT];
+  const w = spriteDrawWidth * scale;
+  const h = SPRITE_DRAW_HEIGHT * scale;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle + SPRITE_ANGLE_OFFSET);
-  ctx.drawImage(
-    frame,
-    -spriteDrawWidth / 2, -SPRITE_DRAW_HEIGHT / 2,
-    spriteDrawWidth, SPRITE_DRAW_HEIGHT
-  );
+  ctx.drawImage(frame, -w / 2, -h / 2, w, h);
   ctx.restore();
 }
 
 // Draws one ant at (x, y), heading `angle`, walk-cycle position
 // `animPhase` on the given context — sprite once loaded, triangle
 // fallback until then. Called identically by both draw paths.
-export function drawAnt(ctx, x, y, angle, animPhase) {
+//
+// `scale` exists for the queen, who is the same silhouette as a worker and
+// has to stay that way: the sprite is a black shape with no outline, so
+// re-colouring her isn't available (see CLAUDE.md on the palette), and size
+// is how a queen reads as a queen anyway.
+export function drawAnt(ctx, x, y, angle, animPhase, scale = 1) {
   if (spriteReady) {
-    drawSprite(ctx, x, y, angle, animPhase);
+    drawSprite(ctx, x, y, angle, animPhase, scale);
   } else {
-    drawFallback(ctx, x, y, angle);
+    drawFallback(ctx, x, y, angle, scale);
   }
 }
 

@@ -40,7 +40,7 @@
 // state machine is digging.js's, drawing is undergroundRender.js's.
 // ============================================================
 import { ants, idToIndex } from './ants.js';
-import { colony } from './colony.js';
+import { colony, brood } from './colony.js';
 import {
   entrance, depthOf, carveDisc,
   getGridSize, cellCoords, cellCenter, inGrid, isTunnel, isTunnelCell, hasAdjacentTunnel,
@@ -57,8 +57,8 @@ import {
   FOUNDING_CHAMBER_RADIUS,
   BAND_ATRIUM_MIN, BAND_ATRIUM_MAX, BAND_FOOD_MIN, BAND_FOOD_MAX,
   BAND_BROOD_MIN, BAND_BROOD_MAX,
-  BROOD_AREA_PER_ANT, ATRIUM_AREA_PER_ANT, STORE_AREA_PER_FOOD,
-  CHAMBER_FOOD_PER_AREA,
+  BROOD_AREA_PER_BROOD, ATRIUM_AREA_PER_ANT, STORE_AREA_PER_FOOD,
+  CHAMBER_FOOD_PER_AREA, BROOD_PACK_AREA,
   NEST_PROJECT_COOLDOWN, NEST_TUNNEL_RADIUS,
   NEST_CHAMBER_CLEARANCE_SHALLOW, NEST_CHAMBER_CLEARANCE_DEEP,
   NEST_SITE_ATTEMPTS,
@@ -137,13 +137,16 @@ function nestDepth() {
 // impossible to satisfy by WIDENING one — which made enlargement, the
 // dominant growth mode in real nests, unreachable.
 //
-// Brood demand currently reads worker population, standing in for brood
-// count until brood entities exist (ROADMAP.md Phase C/D). Swap the
-// reader, not the shape of the rule, once brood is real.
+// Brood demand reads the real brood count now that the queen lays (Phase
+// C). It used to read worker population as a stand-in; the shape of the
+// rule was always right, only the reader was provisional. One consequence
+// worth expecting: a brand new colony has no brood, so it digs its top
+// rooms first and only opens the nursery strata as the queen fills them —
+// which is the order an incipient nest actually grows in.
 const DEMAND_RULES = [
   {
     purpose: PURPOSE_BROOD,
-    requiredArea: () => ants.count * BROOD_AREA_PER_ANT,
+    requiredArea: () => brood.length * BROOD_AREA_PER_BROOD,
   },
   {
     purpose: PURPOSE_FOOD,
@@ -293,6 +296,82 @@ export function chooseStoreChamber() {
     if (!store || c.food < store.food) store = c;
   }
   return store ?? getQueenChamber();
+}
+
+// Food OUT of the nest, the counterpart of depositChamberFood — the queen
+// paying for an egg (queen.js) is the first and so far only caller.
+//
+// Her own chamber is drawn down first, since that's where a load ends up by
+// default (chooseStoreChamber's fallback) and where she actually eats. Any
+// other room with food is fair game after that: workers carry food to the
+// queen mouth-to-mouth, so a full larder in the middle of the nest is
+// genuinely available to her, it just isn't where she is.
+//
+// All-or-nothing: it takes the whole cost or nothing at all, so a lay can't
+// half-consume food and then fail.
+export function takeNestFood(amount) {
+  const queenChamber = getQueenChamber();
+  const order = chambers.slice().sort((a, b) => {
+    if (a === queenChamber) return -1;
+    if (b === queenChamber) return 1;
+    return b.food - a.food; // fullest first, so one room empties before the next is touched
+  });
+
+  let available = 0;
+  for (const c of order) available += c.food;
+  if (available < amount) return false;
+
+  let left = amount;
+  for (const c of order) {
+    if (left <= 0) break;
+    const take = Math.min(c.food, left);
+    c.food -= take;
+    left -= take;
+  }
+  return true;
+}
+
+// How much brood a room can hold, from its floor area — the same
+// area-is-capacity reasoning chamberFoodCapacity uses.
+function chamberBroodCapacity(c) {
+  return Math.PI * c.radius * c.radius / BROOD_PACK_AREA;
+}
+
+function broodInChamber(c) {
+  let n = 0;
+  for (const b of brood) {
+    if (Math.hypot(b.x - c.x, b.y - c.y) <= c.radius) n++;
+  }
+  return n;
+}
+
+// Where a new egg goes. The queen's own chamber first — she lays where she
+// stands — then any other room in the brood stratum with space.
+//
+// That second part is a stand-in for a behavior that doesn't exist yet:
+// real workers lift eggs off the queen almost as fast as she lays them and
+// pile them in whichever brood chamber suits, so brood ends up spread
+// across the nursery rooms rather than heaped under her. Until nurses exist
+// (Phase E) the egg simply appears where a nurse would have put it. Without
+// this the queen would stop laying the moment her one room filled, no
+// matter how much nursery the colony had dug elsewhere.
+export function chooseBroodChamber() {
+  const queenChamber = getQueenChamber();
+  if (queenChamber && broodInChamber(queenChamber) < chamberBroodCapacity(queenChamber)) {
+    return queenChamber;
+  }
+  let best = null;
+  let bestFree = 0;
+  for (const c of chambers) {
+    if (c === queenChamber) continue;
+    if (purposeOf(c) !== PURPOSE_BROOD) continue;
+    const free = chamberBroodCapacity(c) - broodInChamber(c);
+    if (free > bestFree) {
+      bestFree = free;
+      best = c;
+    }
+  }
+  return best;
 }
 
 // Credits a delivered load to whichever chamber the ant reached.
