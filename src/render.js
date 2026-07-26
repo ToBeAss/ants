@@ -12,6 +12,7 @@ import {
   NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
   PHEROMONE_COLOR, PHEROMONE_MAX,
   DOMAIN_SURFACE,
+  GROUND_COLOR, NEST_COLOR, FOOD_COLOR, OBSTACLE_COLOR, CARRY_MARKER_COLOR,
 } from './config.js';
 
 export const canvas = document.getElementById('canvas');
@@ -93,20 +94,20 @@ function drawWorld() {
   // nest — simple dirt-mound marker
   ctx.beginPath();
   ctx.arc(nest.x, nest.y, NEST_DRAW_RADIUS, 0, Math.PI * 2);
-  ctx.fillStyle = '#5c4326';
+  ctx.fillStyle = NEST_COLOR;
   ctx.fill();
 
   // food sources
-  ctx.fillStyle = '#8fd14f';
+  ctx.fillStyle = FOOD_COLOR;
   for (const f of food) {
     ctx.beginPath();
     ctx.arc(f.x, f.y, FOOD_DRAW_RADIUS, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // obstacles — plain stone-grey circles, distinct from the brown nest
-  // and green food markers
-  ctx.fillStyle = '#8a8a8a';
+  // obstacles — stone circles, distinct from the brown nest and green
+  // food markers
+  ctx.fillStyle = OBSTACLE_COLOR;
   for (const obs of obstacles) {
     ctx.beginPath();
     ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
@@ -118,7 +119,7 @@ function drawCarryIndicator(x, y) {
   // small morsel marker on top of an ant currently returning with food
   ctx.beginPath();
   ctx.arc(x, y, 2, 0, Math.PI * 2);
-  ctx.fillStyle = '#8fd14f';
+  ctx.fillStyle = CARRY_MARKER_COLOR;
   ctx.fill();
 }
 
@@ -139,6 +140,13 @@ export function getCurrentView() {
 }
 
 function drawSurface() {
+  // Ground is painted here rather than left to the page's CSS
+  // background: both views then own their own ground colour from the
+  // same palette (see config.js), instead of the surface's living in
+  // index.html while the underground's lives in a draw call.
+  ctx.fillStyle = GROUND_COLOR;
+  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
   drawPheromones();
   drawWorld();
 

@@ -20,10 +20,15 @@ export const ants = {
   homeVectorY: new Float32Array(MAX_ANTS),
   domain: new Uint8Array(MAX_ANTS),      // DOMAIN_SURFACE or DOMAIN_UNDERGROUND — which view this ant
                                           // currently exists in (see underground.js's entrance linkage)
-  digTargetX: new Float32Array(MAX_ANTS), // the frontier cell a STATE_DIG ant is carving — remembered across
-  digTargetY: new Float32Array(MAX_ANTS), // its carve-pause so the cell converts at the END of the pause, not
-                                           // on arrival (see digging.js)
-  digExiting: new Uint8Array(MAX_ANTS),   // 1 once a digger has given up finding more to carve and is
+  digTargetX: new Float32Array(MAX_ANTS), // the cell a STATE_DIG ant has claimed from the nest plan —
+  digTargetY: new Float32Array(MAX_ANTS), // remembered across its carve-pause so the cell converts at the END
+                                           // of the pause, not on arrival (see digging.js/nestPlan.js)
+  digCarveTotal: new Float32Array(MAX_ANTS), // full duration of the current carve — stateTimer counts down from
+                                           // it, and the ratio of the two is the progress the renderer shades
+  digTravelTimer: new Float32Array(MAX_ANTS), // seconds spent walking toward the claimed cell (or back to the
+                                           // entrance) — bounded, since with no pathfinding a target around a
+                                           // bend can be unreachable (see DIG_TRAVEL_TIMEOUT)
+  digExiting: new Uint8Array(MAX_ANTS),   // 1 once a digger has no work left (or gave up reaching it) and is
                                            // walking back to the entrance to cross up, else 0 (see digging.js)
   id: new Uint32Array(MAX_ANTS),
   count: 0,
@@ -47,6 +52,14 @@ export function spawnAnt(x, y) {
   ants.homeVectorX[i] = x - nest.x; // accurate at spawn — drift only accumulates from movement onward
   ants.homeVectorY[i] = y - nest.y;
   ants.domain[i] = DOMAIN_SURFACE;
+  // Dig fields reset explicitly: a slot freed by killAnt() gets reused,
+  // so these can hold a previous occupant's leftovers rather than the
+  // zeros a freshly-allocated array would have.
+  ants.digTargetX[i] = 0;
+  ants.digTargetY[i] = 0;
+  ants.digCarveTotal[i] = 0;
+  ants.digTravelTimer[i] = 0;
+  ants.digExiting[i] = 0;
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -73,6 +86,8 @@ export function killAnt(index) {
     ants.domain[index] = ants.domain[last];
     ants.digTargetX[index] = ants.digTargetX[last];
     ants.digTargetY[index] = ants.digTargetY[last];
+    ants.digCarveTotal[index] = ants.digCarveTotal[last];
+    ants.digTravelTimer[index] = ants.digTravelTimer[last];
     ants.digExiting[index] = ants.digExiting[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping

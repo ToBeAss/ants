@@ -8,7 +8,11 @@
         html, body {
             margin: 0;
             padding: 0;
-            background: #ffefc1;
+            /* Only visible for the instant before the first frame draws —
+               both views paint their own ground now (GROUND_COLOR /
+               UNDERGROUND_DIRT_COLOR in src/config.js). Keep this in
+               sync with GROUND_COLOR so page load doesn't flash. */
+            background: #f2e1b4;
             overflow: hidden;
             height: 100%;
         }

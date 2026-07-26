@@ -8,6 +8,7 @@ import { ants } from './ants.js';
 import { updateIdleState, wander, avoidSurfaces, integrate, separationSteer } from './behaviors.js';
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
 import { checkDigRecruitment, updateDigging } from './digging.js';
+import { updateNestPlan } from './nestPlan.js';
 import { avoidTunnelWalls } from './underground.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
 import { rebuildSpatialGrid } from './spatialGrid.js';
@@ -15,6 +16,7 @@ import { obstacles } from './world.js';
 import {
   ANT_LENGTH,
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
+  DIG_TWITCH_CHANCE, DIG_TWITCH_AMOUNT,
   WALK_ANIM_FPS,
   STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN, STATE_DIG,
   HOME_VECTOR_ERROR_RATE,
@@ -29,6 +31,8 @@ export function simStep(dt) {
   decayPheromones(dt); // once per tick, not per ant — a single pass over the whole grid
   diffusePheromones(dt); // ditto — spreads the trail, separate concern from decay shrinking it
   rebuildSpatialGrid(ants); // ditto — bins every ant fresh, used by separationSteer below
+  updateNestPlan(dt); // ditto — colony-level, not per-ant: decides whether the nest currently needs a new
+                      // chamber dug, and retires a project once its last cell is open (see nestPlan.js)
 
   for (let i = 0; i < ants.count; i++) {
     const state = ants.state[i];
@@ -65,7 +69,18 @@ export function simStep(dt) {
       // the tick a digger finishes and crosses back to the surface
       // (see digging.js) — that transition tick still moves normally,
       // using its fresh domain/position, via the domain check below.
-      if (updateDigging(ants, i, dt)) continue;
+      if (updateDigging(ants, i, dt)) {
+        // Frozen at the dirt face for the whole carve (~10-15s), so the
+        // twitch matters more here than anywhere else it's used: idle
+        // and handling pauses are brief, but a digger holding perfectly
+        // still this long reads as a hung ant rather than a working
+        // one. Faster and smaller than the idle twitch (see config.js)
+        // — scraping at a wall, not glancing around.
+        if (Math.random() < DIG_TWITCH_CHANCE * dt) {
+          ants.rotation[i] += (Math.random() - 0.5) * DIG_TWITCH_AMOUNT;
+        }
+        continue;
+      }
     } else {
       // FORAGE or RETURN — task-committed: no idling, no wander noise,
       // straight-line steering toward the current target instead.

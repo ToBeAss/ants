@@ -1,51 +1,127 @@
 // ============================================================
 // Underground render — draws the side-view tunnel cross-section
-// (ROADMAP.md Phase B). Reads underground.js's grid/entrance state
-// and ants.js's domain flag; never mutates either. Sibling to
-// render.js's surface draw path, kept in its own file per the
-// project's "new concerns get new files" convention — also keeps the
-// two draw paths cleanly separable for the eventual dual-screen setup
-// (see ROADMAP.md).
+// (ROADMAP.md Phase B). Reads underground.js's grid/entrance state,
+// nestPlan.js's chambers/active project, and ants.js's domain flag;
+// never mutates any of them. Sibling to render.js's surface draw path,
+// kept in its own file per the project's "new concerns get new files"
+// convention — also keeps the two draw paths cleanly separable for the
+// eventual dual-screen setup (see ROADMAP.md).
 // ============================================================
 import { ants } from './ants.js';
 import { getUndergroundGrid, DIRT } from './underground.js';
+import { getChambers, getActiveProject, PURPOSE_QUEEN, PURPOSE_BROOD, PURPOSE_FOOD } from './nestPlan.js';
 import { drawAnt } from './antSprite.js';
-import { DOMAIN_UNDERGROUND } from './config.js';
+import {
+  DOMAIN_UNDERGROUND,
+  UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR, ENTRANCE_COLOR,
+  CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD, PLAN_COLOR,
+} from './config.js';
 
-const DIRT_COLOR = '#7a5230';
-const TUNNEL_COLOR = '#241812';   // dark negative space — reads as "dug out," distinct from open ground
-const UNLOCKED_BOUNDARY_COLOR = 'rgba(255, 255, 255, 0.35)';
-const ENTRANCE_COLOR = '#c9a24b';
+// Parsed once from the palette above, for the carve-progress blend —
+// the shading lerps dirt -> tunnel per cell, which needs components,
+// not hex strings. Derived rather than duplicated so there's still one
+// place to change a colour (see config.js's palette section).
+function rgbOf(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+const DIRT_RGB = rgbOf(UNDERGROUND_DIRT_COLOR);
+const TUNNEL_RGB = rgbOf(UNDERGROUND_TUNNEL_COLOR);
+
+// Per-purpose chamber annotation: a ring + small label rather than a
+// filled colour — the point is to make the nest legible as ROOMS WITH
+// JOBS (the thing that separates ant-keeping from watching ants), while
+// leaving the excavation itself the visually dominant thing.
+const CHAMBER_STYLE = {
+  [PURPOSE_QUEEN]: { color: CHAMBER_COLOR_QUEEN, label: 'queen' },
+  [PURPOSE_BROOD]: { color: CHAMBER_COLOR_BROOD, label: 'brood' },
+  [PURPOSE_FOOD]: { color: CHAMBER_COLOR_FOOD, label: 'stores' },
+};
+const CHAMBER_RING_INSET = 2; // px — keeps the ring on carved floor rather than straddling the dirt boundary,
+                              // where a dark ring would half-vanish into the dark earth
 
 export function drawUnderground(ctx) {
-  const { grid, cols, rows, cellSize, entrance, unlockedCenter, unlockedRadius } = getUndergroundGrid();
+  const { grid, progress, cols, rows, cellSize, entrance } = getUndergroundGrid();
   if (cols === 0 || rows === 0) return;
 
   // Dirt fills the whole background in one rect; only tunnel cells get
   // drawn on top as "removed" — dirt is the common case almost
   // everywhere early on, so this is far fewer draw calls than filling
   // every dirt cell individually.
-  ctx.fillStyle = DIRT_COLOR;
+  ctx.fillStyle = UNDERGROUND_DIRT_COLOR;
   ctx.fillRect(0, 0, cols * cellSize, rows * cellSize);
 
-  ctx.fillStyle = TUNNEL_COLOR;
+  ctx.fillStyle = UNDERGROUND_TUNNEL_COLOR;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      if (grid[row * cols + col] === DIRT) continue;
+      const idx = row * cols + col;
+      if (grid[idx] === DIRT) continue;
       ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
     }
   }
 
-  // Unlocked-region boundary — visualizes the current "container size"
-  // (see ROADMAP.md's containment framing). Purely informational, same
-  // spirit as the pheromone overlay: doesn't affect the simulation.
-  ctx.beginPath();
-  ctx.arc(unlockedCenter.x, unlockedCenter.y, unlockedRadius, 0, Math.PI * 2);
-  ctx.strokeStyle = UNLOCKED_BOUNDARY_COLOR;
+  // Cells currently being carved, shaded part-way toward tunnel color.
+  // A carve takes DIG_CARVE_MIN..MAX seconds now (see config.js), and
+  // without this an ant standing still for ~12s looks broken rather
+  // than busy. Separate pass from the loop above so the common case
+  // (no fillStyle churn) stays a single style for every tunnel cell —
+  // at most DIG_FORCE_MAX cells are ever in progress at once.
+  for (let idx = 0; idx < progress.length; idx++) {
+    const t = progress[idx];
+    if (t <= 0) continue;
+    const r = Math.round(DIRT_RGB[0] + (TUNNEL_RGB[0] - DIRT_RGB[0]) * t);
+    const g = Math.round(DIRT_RGB[1] + (TUNNEL_RGB[1] - DIRT_RGB[1]) * t);
+    const b = Math.round(DIRT_RGB[2] + (TUNNEL_RGB[2] - DIRT_RGB[2]) * t);
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    const col = idx % cols;
+    const row = (idx - col) / cols;
+    ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+  }
+
+  // Chambers — what each room is FOR. Purely informational, same spirit
+  // as the pheromone overlay: doesn't affect the simulation.
   ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  for (const c of getChambers()) {
+    const style = CHAMBER_STYLE[c.purpose];
+    if (!style) continue;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, Math.max(1, c.radius - CHAMBER_RING_INSET), 0, Math.PI * 2);
+    ctx.strokeStyle = style.color;
+    ctx.stroke();
+    ctx.fillStyle = style.color;
+    ctx.fillText(style.label, c.x, c.y + 3);
+  }
+
+  // The chamber under construction, dashed — you can see where the
+  // colony has decided to expand to before they've got there, which is
+  // most of what makes the digging read as deliberate rather than
+  // random. Vanishes into a solid ring above once finished.
+  const project = getActiveProject();
+  if (project) {
+    ctx.beginPath();
+    ctx.moveTo(project.fromX, project.fromY);
+    ctx.lineTo(project.x, project.y);
+    ctx.strokeStyle = PLAN_COLOR;
+    ctx.setLineDash([3, 5]);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(project.x, project.y, project.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const style = CHAMBER_STYLE[project.purpose];
+    if (style) {
+      ctx.fillStyle = PLAN_COLOR;
+      ctx.fillText(style.label, project.x, project.y + 3);
+    }
+  }
+  ctx.textAlign = 'start';
 
   // Entrance marker — the single point linking the two views.
   ctx.beginPath();

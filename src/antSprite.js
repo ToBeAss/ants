@@ -4,7 +4,7 @@
 // ant looks identical in both views rather than one of them using a
 // placeholder.
 // ============================================================
-import { ANT_LENGTH, WALK_FRAME_COUNT } from './config.js';
+import { ANT_LENGTH, ANT_WIDTH, WALK_FRAME_COUNT, ANT_FALLBACK_COLOR } from './config.js';
 
 // Faces "up" (-Y). rotation=0 in this sim means facing "right" (+X),
 // matching the Math.cos/sin convention used in integrate()/wander().
@@ -38,7 +38,6 @@ walkFrames[0].addEventListener('load', () => {
 function drawFallback(ctx, x, y, angle) {
   // Triangle placeholder — used only until frames have loaded, so
   // there's never a blank frame on page load.
-  const ANT_WIDTH = 2.5;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const noseX = x + cos * ANT_LENGTH;
@@ -48,7 +47,7 @@ function drawFallback(ctx, x, y, angle) {
   const perpX = -sin * ANT_WIDTH;
   const perpY = cos * ANT_WIDTH;
 
-  ctx.fillStyle = '#e8d8b8';
+  ctx.fillStyle = ANT_FALLBACK_COLOR;
   ctx.beginPath();
   ctx.moveTo(noseX, noseY);
   ctx.lineTo(backX + perpX, backY + perpY);

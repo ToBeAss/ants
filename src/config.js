@@ -25,6 +25,64 @@ export const SHADOW_LENGTH = ANT_LENGTH * 0.95; // semi-axis along body's long a
 export const SHADOW_WIDTH = ANT_LENGTH * 0.35;  // semi-axis across the body
 export const SHADOW_OFFSET_Y = ANT_LENGTH * 0.12; // small fixed world-space offset (light direction)
 
+// ============================================================
+// Palette — every colour both draw paths use. Gathered here (they used
+// to be file-local consts in render.js/undergroundRender.js) because
+// they're tuning values like any other, and because the two views have
+// to be considered TOGETHER: the ant sprite is a black silhouette with
+// no outline, so it is only ever as visible as the ground behind it.
+// That constraint drives everything below — ground tones stay light,
+// and anything an ant walks on must stay well clear of the sprite's
+// value.
+// ============================================================
+
+// Surface. Painted by render.js as a filled rect rather than left to
+// the page background, so both views own their own ground and the
+// palette lives in one place. index.html's CSS background should match
+// GROUND_COLOR — it's only visible for the instant before the first
+// frame draws.
+export const GROUND_COLOR = '#f2e1b4';    // warm sand. Was #ffefc1 (in CSS) — barely changed in value, just
+                                           // pulled toward sand and away from pale yellow, which reads more
+                                           // like ground and is a little easier on a screen left running.
+export const NEST_COLOR = '#5c4326';      // dirt-mound marker — the darkest thing on the surface besides ants
+export const FOOD_COLOR = '#5aa832';      // was #8fd14f: too close to the sand's brightness to read as a
+                                           // distinct object at FOOD_DRAW_RADIUS, and ants standing on a food
+                                           // pile disappeared into it. Deeper green separates from both.
+export const OBSTACLE_COLOR = '#9a9187';  // stone, warmed slightly so it sits in the same family as the sand
+                                           // instead of reading as a cold grey hole in the picture
+export const CARRY_MARKER_COLOR = '#bcf07a'; // the morsel on a carrying ant — deliberately LIGHTER than
+                                           // FOOD_COLOR: it's drawn on top of a black sprite, not on sand
+
+// Underground. The old palette had this exactly backwards for
+// legibility: dirt was mid-brown (#7a5230) and dug tunnels were nearly
+// black (#241812), so ants — the only thing that moves down there —
+// were black-on-black inside the very spaces they'd dug. Inverted: dug
+// galleries are the light surface (ants sharply visible in them, same
+// figure/ground relationship as the surface view), packed earth is the
+// dark mass around them. Nest structure stays legible because the two
+// are far apart in value; carve progress interpolates between them, so
+// a cell being worked visibly lightens as it opens.
+export const UNDERGROUND_DIRT_COLOR = '#6f4c2e';   // packed earth
+export const UNDERGROUND_TUNNEL_COLOR = '#f0dcb4'; // open gallery — kept close to GROUND_COLOR so an ant looks
+                                                    // equally readable in either view
+export const ENTRANCE_COLOR = '#8c5a14';  // the one point linking the views; dark enough to read against the
+                                           // light gallery it sits in
+
+// Chamber annotation (undergroundRender.js) — a ring + label per
+// chamber purpose, drawn INSIDE the finished chamber, i.e. on light
+// gallery floor, so these are dark and saturated. PLAN_COLOR is the
+// exception: the chamber under construction is outlined over undug
+// earth, so it has to be light instead.
+// Pre-load placeholder triangle (antSprite.js), for the moment before
+// the sprite frames decode. Dark, matching the actual sprite — it was
+// pale (#e8d8b8), which is near-invisible against either view's ground.
+export const ANT_FALLBACK_COLOR = '#141210';
+
+export const CHAMBER_COLOR_QUEEN = 'rgba(150, 84, 8, 0.8)';
+export const CHAMBER_COLOR_BROOD = 'rgba(32, 78, 138, 0.75)';
+export const CHAMBER_COLOR_FOOD = 'rgba(38, 104, 46, 0.75)';
+export const PLAN_COLOR = 'rgba(255, 240, 210, 0.45)';
+
 // Walk-cycle animation
 export const WALK_FRAME_COUNT = 6;   // frames extracted from the source sheet
 export const WALK_ANIM_FPS = 14;     // frame-steps/sec at baseline (WANDER) speed — cadence of the leg
@@ -234,14 +292,16 @@ export const FOOD_VALUE_PER_DELIVERY = 1; // added to colony.food per completed 
 export const UNDERGROUND_CELL_SIZE = 8;                // px — world-space size of one grid cell
 export const UNDERGROUND_CHAMBER_RADIUS = 40;          // px — initial hand-dug starting chamber at the entrance,
                                                          // so the queen (Phase C) and first brood (Phase D) have
-                                                         // somewhere to be before any digging happens
-export const UNDERGROUND_UNLOCKED_RADIUS_INITIAL = 60; // px — "test tube"-sized diggable region at start (see
-                                                         // ROADMAP.md's containment framing) — must comfortably
-                                                         // exceed UNDERGROUND_CHAMBER_RADIUS so the starting
-                                                         // chamber fits inside the starting unlocked region
-export const UNDERGROUND_UNLOCKED_RADIUS_EXPAND = 50;   // px — growth per container-expansion action. Not yet
-                                                         // wired to input (that's a later Phase B checklist item);
-                                                         // expandUnlockedRegion() is ready for main.js to call
+                                                         // somewhere to be before any digging happens. Doubles as
+                                                         // the queen chamber's radius in the nest plan (nestPlan.js)
+// The diggable area is deliberately NOT capped any more (decided
+// 2026-07-26). It used to be an unlocked-region circle around the
+// starting chamber (AntsCanada "test tube" containment framing, see
+// ROADMAP.md) — what actually bounds digging now is demand: nestPlan.js
+// only ever opens an excavation project the colony currently needs, so
+// there's no runaway digging for a hard cap to prevent. Containment as
+// a player-facing stewardship action is deferred, not deleted — see
+// ROADMAP.md Phase B.
 
 // Tunnel movement (underground.js's avoidTunnelWalls()) — mirrors
 // AVOID_* above (same continuous-steering paradigm, dirt cells treated
@@ -273,10 +333,67 @@ export const DOMAIN_UNDERGROUND = 1;
 // the nest has a small per-second chance to become a digger, rather
 // than every ant that passes by triggering it — no direct player
 // command, same stewardship-not-control principle as everything else.
-export const DIG_ENTER_CHANCE = 0.03;    // per second, only rolled while within SENSE_RADIUS of the nest —
-                                          // deliberately lower than IDLE_ENTER_CHANCE (0.08): going
-                                          // underground is a bigger commitment than a brief idle pause
+// Additionally gated on the colony actually HAVING excavation work
+// (nestPlan.js) — with no unmet need, nobody goes underground at all.
+export const DIG_ENTER_CHANCE = 0.06;    // per second, only rolled while within SENSE_RADIUS of the nest AND
+                                          // while the nest plan has an active project short of diggers. Was
+                                          // 0.03 back when digging was always available; now that it's
+                                          // need-gated, a project that IS open should staff up reasonably fast.
 export const DIG_ARRIVE_RADIUS = ANT_LENGTH + UNDERGROUND_CELL_SIZE; // px — same "close enough to physically
                                           // act" idea as PICKUP_RADIUS/NEST_ARRIVE_RADIUS
-export const DIG_MIN = 0.6;              // seconds — brief pause "carving" a cell, same idea as PICKUP_MIN/DROPOFF_MIN
-export const DIG_MAX = 1.4;
+export const DIG_FORCE_MAX = 8;          // simultaneous diggers on the active project — the rest of the colony
+                                          // keeps foraging. Excavation is a side activity, not the whole colony
+                                          // downing tools.
+// Excavating one cell is SLOW — real ants shift soil grain by grain,
+// and a chamber is the work of many ants over a long time. Was 0.6-1.4s
+// (a pickup-sized pause), which made a whole chamber appear in seconds
+// and read as instant terraforming rather than labour. At ~12s/cell a
+// typical project (see NEST_* below, roughly 60-90 cells) is a couple
+// of minutes of visible work for a full dig force — deliberately on the
+// ambient timescale the project is built around, not an action beat.
+export const DIG_CARVE_MIN = 9;          // seconds to carve one cell
+export const DIG_CARVE_MAX = 16;
+export const DIG_TWITCH_CHANCE = 7.0;    // per second — faster than IDLE_TWITCH_CHANCE (4.5) and, below,
+export const DIG_TWITCH_AMOUNT = 0.3;    // radians — a smaller snap than IDLE_TWITCH_AMOUNT (0.6). A carve
+                                          // holds an ant still for DIG_CARVE_MIN..MAX seconds, far longer than
+                                          // any idle/handling pause, so it needs visible activity or it reads
+                                          // as a stuck ant — and busy scraping at a wall is a quick small
+                                          // motion, where idle glancing-about is a slower larger one.
+export const DIG_TRAVEL_TIMEOUT = 30;    // seconds — a digger that can't reach its claimed cell in this long is
+                                          // stuck (no pathfinding: a claimed cell around a bend can be genuinely
+                                          // unreachable by straight-line seeking). Gives up, releases the claim
+                                          // for someone better-placed, and heads out. Same "give up on a belief
+                                          // that isn't working" idea foraging.js uses for lost carriers.
+export const DIG_EXIT_TIMEOUT = 45;      // seconds — backstop on the walk back to the entrance, for the same
+                                          // reason; on expiry the ant surfaces regardless of where it got to,
+                                          // same spirit as sim.js's hard position clamps
+
+// Nest planning (nestPlan.js) — the colony decides WHAT to excavate and
+// WHEN, and diggers carry out that plan. Chambers exist for a purpose
+// (queen, brood, food store) and are only dug once the colony actually
+// needs one: a nest that expands ahead of demand is wasted work and, in
+// real ant-keeping terms, extra tunnel exposed to predators for no gain.
+export const CHAMBER_RADIUS_BROOD = 34;  // px — brood chambers are the big ones; brood is bulky and tended
+export const CHAMBER_RADIUS_FOOD = 26;   // px — food stores are smaller
+export const ANTS_PER_BROOD_CHAMBER = 60; // colony size each brood chamber supports. The STARTING chamber covers
+                                          // the first generation, so the count is floor(pop / this) — the first
+                                          // dedicated brood chamber isn't dug until the colony has outgrown home.
+                                          // Population stands in for brood count until brood exists (Phase C/D),
+                                          // at which point this rule reads the brood array instead.
+export const FOOD_PER_STORAGE_CHAMBER = 50; // colony.food each storage chamber holds — deliveries accumulating
+                                          // past this is what triggers digging the next one
+export const NEST_PROJECT_COOLDOWN = 25; // seconds of quiet after finishing a project before the colony will
+                                          // open another, even if demand is already there — keeps expansion
+                                          // paced and deliberate rather than one continuous excavation
+export const NEST_TUNNEL_LENGTH_MIN = 45; // px — how far a new chamber sits from the one it branches off
+export const NEST_TUNNEL_LENGTH_MAX = 110;
+export const NEST_TUNNEL_RADIUS = 10;    // px — corridor half-width. Must exceed UNDERGROUND_CELL_SIZE/2 by a
+                                          // real margin: a one-cell-wide corridor puts dirt within
+                                          // TUNNEL_AVOID_MARGIN on BOTH sides, whose push vectors cancel (see
+                                          // avoidTunnelWalls) and leave an ant steering blind down it.
+export const NEST_CHAMBER_CLEARANCE = 18; // px — minimum dirt left between two chambers' edges, so the nest
+                                          // reads as distinct rooms rather than one merged cavity
+export const NEST_SITE_ANGLE_SPREAD = 1.2; // rad — half-spread around straight down. Nests grow downward and
+                                          // outward, not upward toward the surface.
+export const NEST_SITE_ATTEMPTS = 60;    // random candidate sites tried before giving up this tick (a failure
+                                          // just means no project opens yet — it retries next tick)

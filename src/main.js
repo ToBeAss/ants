@@ -10,6 +10,7 @@ import { resizeCanvas, render, canvas, toggleTrailVisibility, toggleView, getCur
 import { initWorld, nest, spawnFoodAt, addObstacle } from './world.js';
 import { initPheromones } from './pheromones.js';
 import { initUnderground } from './underground.js';
+import { initNestPlan } from './nestPlan.js';
 import { OBSTACLE_RADIUS } from './config.js';
 
 // Pheromone grid dimensions are locked in at initPheromones() and never
@@ -27,15 +28,23 @@ import { OBSTACLE_RADIUS } from './config.js';
 // linkage"). nest itself doesn't reposition on resize (same accepted
 // limitation as world.js), so re-reading it here is just re-deriving
 // the entrance from whatever nest.x already is, not moving it.
+// initNestPlan() must follow initUnderground() in both places — it
+// registers the starting chamber as the queen chamber and branches the
+// first tunnel off it, so it reads state initUnderground() just set.
+// On resize the dug grid resets, so the plan (chambers dug, project in
+// progress) has to reset with it or it would describe tunnels that no
+// longer exist.
 window.addEventListener('resize', () => {
   resizeCanvas();
   initPheromones(window.innerWidth, window.innerHeight);
   initUnderground(window.innerWidth, window.innerHeight);
+  initNestPlan();
 });
 resizeCanvas();
 initWorld(window.innerWidth, window.innerHeight);
 initPheromones(window.innerWidth, window.innerHeight);
 initUnderground(window.innerWidth, window.innerHeight);
+initNestPlan();
 
 // Food only ever appears via click — no auto-spawn, no auto-respawn.
 // Shift+Click places an obstacle instead. getBoundingClientRect()

@@ -7,13 +7,13 @@
 // are separate, later Phase B pieces — this file is data + the
 // carve/query API they'll all sit on top of.
 //
-// Containment framing (decided 2026-07-26, see ROADMAP.md): the grid
-// is full-size from init, but only a small "unlocked" region around
-// the starting chamber is diggable at first — an AntsCanada-style
-// test tube, not a full formicarium on day one. Expanding the
-// unlocked region is a future player-facing stewardship action (same
-// category as dropping food or placing an obstacle); expandUnlockedRegion()
-// is ready for main.js to wire up once that interaction is built.
+// The whole grid is diggable (changed 2026-07-26 — there used to be an
+// "unlocked region" circle gating digCell()). What bounds digging now
+// is demand, not geography: nestPlan.js only opens an excavation
+// project when the colony needs a chamber, so this file went back to
+// being what it says it is — the physical medium — with the decision
+// of what to carve owned one level up. This file still knows nothing
+// about WHY a cell is being dug.
 //
 // NOTE: does not currently resize with the window — same accepted
 // "clears and reinitializes on resize" tradeoff already made for the
@@ -24,14 +24,13 @@
 import {
   UNDERGROUND_CELL_SIZE,
   UNDERGROUND_CHAMBER_RADIUS,
-  UNDERGROUND_UNLOCKED_RADIUS_INITIAL,
-  UNDERGROUND_UNLOCKED_RADIUS_EXPAND,
   TUNNEL_AVOID_MARGIN,
   TUNNEL_AVOID_STEER_BASE,
   TUNNEL_AVOID_STEER_URGENCY,
   TUNNEL_AVOID_HUG_FRACTION,
   DOMAIN_SURFACE,
   DOMAIN_UNDERGROUND,
+  NEST_DRAW_RADIUS,
 } from './config.js';
 import { nest } from './world.js';
 
@@ -41,33 +40,39 @@ export const TUNNEL = 1;
 let cols = 0;
 let rows = 0;
 let grid = new Uint8Array(0);
+// Per-cell carve progress, 0..1, for DIRT cells currently being worked
+// on by a digger (see digging.js). Purely presentational — nothing in
+// the simulation reads it, and a cell is still solid DIRT for movement
+// purposes until it flips to TUNNEL. It exists because carving one cell
+// now takes DIG_CARVE_MIN..MAX seconds: without it, an ant that stops
+// for 12 seconds and then blinks a cell open reads as broken rather
+// than as slow, deliberate work.
+let progress = new Float32Array(0);
 
 // The single point linking the two views (ROADMAP.md's "entrance
 // linkage") — horizontally aligned with the surface nest marker, at
 // the top (y=0) of the underground cross-section.
 export const entrance = { x: 0, y: 0 };
 
-// Diggable region is a circle centered on the starting chamber (fixed
-// once set at init — expansion grows the radius, not the center,
-// same way a real formicarium grows outward from its original tube).
-const unlockedCenter = { x: 0, y: 0 };
-let unlockedRadius = UNDERGROUND_UNLOCKED_RADIUS_INITIAL;
+// The hand-dug chamber every nest starts with, just below the
+// entrance. Exported so nestPlan.js can register it as the queen
+// chamber and branch the first tunnel off it — this file digs it, but
+// has no opinion about what it's FOR.
+export const startChamber = { x: 0, y: 0, radius: UNDERGROUND_CHAMBER_RADIUS };
 
 export function initUnderground(width, height) {
   cols = Math.ceil(width / UNDERGROUND_CELL_SIZE);
   rows = Math.ceil(height / UNDERGROUND_CELL_SIZE);
   grid = new Uint8Array(cols * rows); // 0 = DIRT everywhere by default
+  progress = new Float32Array(cols * rows);
 
   entrance.x = nest.x;
   entrance.y = 0;
 
-  unlockedCenter.x = entrance.x;
-  unlockedCenter.y = entrance.y + UNDERGROUND_CHAMBER_RADIUS;
-  unlockedRadius = UNDERGROUND_UNLOCKED_RADIUS_INITIAL;
+  startChamber.x = entrance.x;
+  startChamber.y = entrance.y + UNDERGROUND_CHAMBER_RADIUS;
 
-  // Starting chamber bypasses the unlocked-region gate (digCircle, not
-  // digCell) since it IS what defines the initial unlocked region.
-  digCircle(unlockedCenter.x, unlockedCenter.y, UNDERGROUND_CHAMBER_RADIUS);
+  digCircle(startChamber.x, startChamber.y, startChamber.radius);
 }
 
 function cellIndex(x, y) {
@@ -85,22 +90,74 @@ export function isTunnel(x, y) {
   return cellAt(x, y) === TUNNEL;
 }
 
-// Whether (x, y) falls within the currently unlocked region — the gate
-// digCell() enforces, and the future container-expansion action widens.
-export function isDiggable(x, y) {
-  return Math.hypot(x - unlockedCenter.x, y - unlockedCenter.y) <= unlockedRadius;
+// ------------------------------------------------------------
+// Cell-coordinate API — nestPlan.js lays out corridors and chambers in
+// grid space (which cells make up a project), so it needs to address
+// cells by (col, row) rather than only by world position. Everything
+// here is a thin accessor; the grid itself stays private to this file.
+// ------------------------------------------------------------
+export function getGridSize() {
+  return { cols, rows, cellSize: UNDERGROUND_CELL_SIZE };
 }
 
-// Carves a single cell to TUNNEL, refusing outside the unlocked region.
-// Called from the (not-yet-built) DIG task once it exists.
+export function cellCoords(x, y) {
+  return {
+    col: Math.floor(x / UNDERGROUND_CELL_SIZE),
+    row: Math.floor(y / UNDERGROUND_CELL_SIZE),
+  };
+}
+
+export function cellCenter(col, row) {
+  return {
+    x: (col + 0.5) * UNDERGROUND_CELL_SIZE,
+    y: (row + 0.5) * UNDERGROUND_CELL_SIZE,
+  };
+}
+
+export function inGrid(col, row) {
+  return col >= 0 && col < cols && row >= 0 && row < rows;
+}
+
+export function isTunnelCell(col, row) {
+  if (!inGrid(col, row)) return false;
+  return grid[row * cols + col] === TUNNEL;
+}
+
+// True if any 4-neighbor is already dug — i.e. this cell can be reached
+// and carved from existing open space. nestPlan.js uses this to decide
+// which of a project's planned cells are claimable yet, which is what
+// makes a corridor get dug outward in order instead of ants opening
+// disconnected pockets partway down it.
+export function hasAdjacentTunnel(col, row) {
+  return (
+    isTunnelCell(col - 1, row) ||
+    isTunnelCell(col + 1, row) ||
+    isTunnelCell(col, row - 1) ||
+    isTunnelCell(col, row + 1)
+  );
+}
+
+// Carves a single cell to TUNNEL. No gating left beyond "the grid
+// exists" — what may be dug is nestPlan.js's call now (see header).
 export function digCell(x, y) {
-  if (cols === 0 || rows === 0 || !isDiggable(x, y)) return false;
-  grid[cellIndex(x, y)] = TUNNEL;
+  if (cols === 0 || rows === 0) return false;
+  const idx = cellIndex(x, y);
+  grid[idx] = TUNNEL;
+  progress[idx] = 0; // done being worked on — the cell is open now
   return true;
 }
 
-// Carves every cell within `radius` of (cx, cy), ignoring the unlocked-
-// region gate — only used internally for the starting chamber at init.
+// How far along a digger is on a cell it hasn't opened yet (0..1).
+// Cleared by digCell() on completion, and by digging.js when an ant
+// abandons a cell (partial progress doesn't survive being abandoned —
+// simpler than tracking who did how much, and rare enough not to matter).
+export function setCellProgress(x, y, t) {
+  if (cols === 0 || rows === 0) return;
+  progress[cellIndex(x, y)] = Math.max(0, Math.min(1, t));
+}
+
+// Carves every cell within `radius` of (cx, cy) — only used internally
+// for the starting chamber at init.
 function digCircle(cx, cy, radius) {
   const minCol = Math.max(0, Math.floor((cx - radius) / UNDERGROUND_CELL_SIZE));
   const maxCol = Math.min(cols - 1, Math.ceil((cx + radius) / UNDERGROUND_CELL_SIZE));
@@ -118,63 +175,15 @@ function digCircle(cx, cy, radius) {
   }
 }
 
-// Player-facing stewardship action (see module header) — not yet wired
-// to input; main.js will call this once the container-expansion
-// interaction is built.
-export function expandUnlockedRegion(amount = UNDERGROUND_UNLOCKED_RADIUS_EXPAND) {
-  unlockedRadius += amount;
-}
-
-// Finds the nearest DIRT cell that's both diggable (within the
-// unlocked region) and 4-neighbor-adjacent to an existing TUNNEL cell
-// — a real frontier reachable by carving outward from what's already
-// dug, not an isolated dirt pocket. Called by digging.js. Only scans
-// the unlocked region's bounding box (small and fixed relative to the
-// full grid), not the whole grid — cheap even once per active digger
-// per tick. Grows with unlockedRadius over time (container expansion),
-// same accepted tradeoff as spatialGrid.js's Map: revisit only if
-// this becomes a measured bottleneck.
-export function findFrontierCell(fromX, fromY) {
-  if (cols === 0 || rows === 0) return null;
-
-  const minCol = Math.max(0, Math.floor((unlockedCenter.x - unlockedRadius) / UNDERGROUND_CELL_SIZE));
-  const maxCol = Math.min(cols - 1, Math.ceil((unlockedCenter.x + unlockedRadius) / UNDERGROUND_CELL_SIZE));
-  const minRow = Math.max(0, Math.floor((unlockedCenter.y - unlockedRadius) / UNDERGROUND_CELL_SIZE));
-  const maxRow = Math.min(rows - 1, Math.ceil((unlockedCenter.y + unlockedRadius) / UNDERGROUND_CELL_SIZE));
-
-  let best = null;
-  let bestDistSq = Infinity;
-
-  for (let row = minRow; row <= maxRow; row++) {
-    for (let col = minCol; col <= maxCol; col++) {
-      const idx = row * cols + col;
-      if (grid[idx] !== DIRT) continue;
-
-      const wx = (col + 0.5) * UNDERGROUND_CELL_SIZE;
-      const wy = (row + 0.5) * UNDERGROUND_CELL_SIZE;
-      if (!isDiggable(wx, wy)) continue;
-
-      const hasAdjacentTunnel =
-        (col > 0 && grid[idx - 1] === TUNNEL) ||
-        (col < cols - 1 && grid[idx + 1] === TUNNEL) ||
-        (row > 0 && grid[idx - cols] === TUNNEL) ||
-        (row < rows - 1 && grid[idx + cols] === TUNNEL);
-      if (!hasAdjacentTunnel) continue;
-
-      const dx = wx - fromX, dy = wy - fromY;
-      const distSq = dx * dx + dy * dy;
-      if (distSq < bestDistSq) {
-        bestDistSq = distSq;
-        best = { x: wx, y: wy };
-      }
-    }
-  }
-
-  return best;
-}
+// There is deliberately no "find the nearest diggable dirt" query here
+// any more. There used to be (findFrontierCell), and it's what made
+// diggers behave like erosion — nibbling whatever dirt happened to be
+// closest, producing a blob rather than a nest. Target selection now
+// comes from nestPlan.js's active project, so a carved cell is always
+// part of a corridor or a chamber the colony decided it needed.
 
 export function getUndergroundGrid() {
-  return { grid, cols, rows, cellSize: UNDERGROUND_CELL_SIZE, entrance, unlockedCenter, unlockedRadius };
+  return { grid, progress, cols, rows, cellSize: UNDERGROUND_CELL_SIZE, entrance };
 }
 
 // ------------------------------------------------------------
@@ -192,12 +201,28 @@ export function enterUnderground(ants, i) {
   ants.domain[i] = DOMAIN_UNDERGROUND;
   ants.x[i] = entrance.x;
   ants.y[i] = entrance.y + UNDERGROUND_CELL_SIZE; // just inside the dug starting chamber, not on its boundary
+  ants.rotation[i] = Math.PI / 2 + (Math.random() - 0.5) * 0.8; // heading down into the chamber, not back up
+                                                                 // at the ceiling it just came through
 }
 
 export function exitToSurface(ants, i) {
   ants.domain[i] = DOMAIN_SURFACE;
-  ants.x[i] = nest.x;
-  ants.y[i] = nest.y;
+  // Emerge from somewhere inside the entrance hole, heading outward —
+  // not from one exact pixel. Snapping every returning ant to the nest's
+  // center point looked like a teleport (most visibly when an ant
+  // crossed down and straight back up again: it appeared to jump from
+  // the edge of the nest marker to its middle), and stacked every
+  // emerging ant on the same spot for separation to then untangle.
+  const angle = Math.random() * Math.PI * 2;
+  const r = Math.random() * NEST_DRAW_RADIUS * 0.6;
+  ants.x[i] = nest.x + Math.cos(angle) * r;
+  ants.y[i] = nest.y + Math.sin(angle) * r;
+  ants.rotation[i] = angle;
+  // Physically at the nest, so its path-integration estimate is
+  // knowably zero — same recalibration foraging.js does on a confirmed
+  // arrival, which this is one of.
+  ants.homeVectorX[i] = 0;
+  ants.homeVectorY[i] = 0;
 }
 
 // ------------------------------------------------------------
