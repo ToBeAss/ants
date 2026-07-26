@@ -16,7 +16,7 @@ python -m http.server 8000
 
 Then open `http://localhost:8000`. **Do not open `index.html` via `file://`** — ES module imports fail silently under `file://` (blank canvas, check the browser console).
 
-Controls: Click = spawn food at cursor. Shift+Click = place a circular obstacle. `T` = toggle pheromone trail overlay (visual only, doesn't affect simulation).
+Controls: Click = spawn food at cursor (surface view only). Shift+Click = place a circular obstacle (surface view only). `T` = toggle pheromone trail overlay (visual only, doesn't affect simulation). `V` = toggle between the surface and underground views (visual only — the simulation keeps running in both regardless of which is on screen).
 
 ## Design philosophy (read before adding features)
 
@@ -34,10 +34,13 @@ src/
   behaviors.js    — generic movement primitives: wander, avoidSurfaces, separationSteer, integrate
   foraging.js     — task state machine: food/nest detection, seek-steering, pickup/dropoff
   world.js        — environment data: nest, food sources, obstacles
+  colony.js       — colony-level state: shared food store, and eventually the queen/brood (Phase C)
+  underground.js  — underground tunnel grid (dirt/tunnel cells), entrance linkage, tunnel-wall avoidance
   pheromones.js   — trail grid: deposit/decay/diffuse/sample/follow
   spatialGrid.js  — coarse ant-position binning for fast neighbor queries
   sim.js          — per-tick orchestration; decides which behaviors run per ant state
-  render.js       — all drawing; reads ant state, never mutates it
+  render.js       — surface drawing, plus the surface/underground view dispatcher; reads ant state, never mutates it
+  undergroundRender.js — underground view drawing (dirt/tunnel cells, entrance, unlocked-region boundary)
   main.js         — wiring, input handling, fixed-timestep loop, init
 ```
 

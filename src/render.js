@@ -5,11 +5,13 @@
 import { ants } from './ants.js';
 import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
+import { drawUnderground } from './undergroundRender.js';
 import {
   ANT_LENGTH, WALK_FRAME_COUNT,
   SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
   NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
   PHEROMONE_COLOR, PHEROMONE_MAX,
+  DOMAIN_SURFACE,
 } from './config.js';
 
 export const canvas = document.getElementById('canvas');
@@ -191,15 +193,28 @@ function drawCarryIndicator(x, y) {
   ctx.fill();
 }
 
-export function render() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  ctx.clearRect(0, 0, w, h);
+// View toggle — 'V' switches between the surface and underground draw
+// paths (same pattern as showTrail's 'T' toggle above, different key
+// since T is taken). See ROADMAP.md Phase B: single canvas, one view
+// rendered at a time, no simultaneous dual-rendering. Surface stays
+// the default/starting view since that's still where all current
+// gameplay (foraging) actually happens.
+let currentView = 'surface'; // 'surface' | 'underground'
 
+export function toggleView() {
+  currentView = currentView === 'surface' ? 'underground' : 'surface';
+}
+
+export function getCurrentView() {
+  return currentView;
+}
+
+function drawSurface() {
   drawPheromones();
   drawWorld();
 
   for (let i = 0; i < ants.count; i++) {
+    if (ants.domain[i] !== DOMAIN_SURFACE) continue; // underground-dwelling ants belong to the other draw path
     // drawAntShadow(ants.x[i], ants.y[i], ants.rotation[i]); // disabled for now — see config.js for tuning notes if re-enabling
     if (spriteReady) {
       drawAntSprite(ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
@@ -209,5 +224,17 @@ export function render() {
     if (ants.carrying[i]) {
       drawCarryIndicator(ants.x[i], ants.y[i]);
     }
+  }
+}
+
+export function render() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  ctx.clearRect(0, 0, w, h);
+
+  if (currentView === 'underground') {
+    drawUnderground(ctx);
+  } else {
+    drawSurface();
   }
 }

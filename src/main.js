@@ -6,9 +6,10 @@
 import { SIM_DT, INITIAL_ANT_COUNT } from './config.js';
 import { spawnAnt } from './ants.js';
 import { simStep } from './sim.js';
-import { resizeCanvas, render, canvas, toggleTrailVisibility } from './render.js';
+import { resizeCanvas, render, canvas, toggleTrailVisibility, toggleView, getCurrentView } from './render.js';
 import { initWorld, nest, spawnFoodAt, addObstacle } from './world.js';
 import { initPheromones } from './pheromones.js';
+import { initUnderground } from './underground.js';
 import { OBSTACLE_RADIUS } from './config.js';
 
 // Pheromone grid dimensions are locked in at initPheromones() and never
@@ -22,13 +23,19 @@ import { OBSTACLE_RADIUS } from './config.js';
 // "doesn't gracefully adapt to resize" tradeoff already accepted for
 // nest/food placement, just applied here too since the alternative
 // (visibly wrong data) is worse than a predictable reset.
+// initUnderground() reads nest.x (see underground.js's "entrance
+// linkage"). nest itself doesn't reposition on resize (same accepted
+// limitation as world.js), so re-reading it here is just re-deriving
+// the entrance from whatever nest.x already is, not moving it.
 window.addEventListener('resize', () => {
   resizeCanvas();
   initPheromones(window.innerWidth, window.innerHeight);
+  initUnderground(window.innerWidth, window.innerHeight);
 });
 resizeCanvas();
 initWorld(window.innerWidth, window.innerHeight);
 initPheromones(window.innerWidth, window.innerHeight);
+initUnderground(window.innerWidth, window.innerHeight);
 
 // Food only ever appears via click — no auto-spawn, no auto-respawn.
 // Shift+Click places an obstacle instead. getBoundingClientRect()
@@ -38,6 +45,9 @@ initPheromones(window.innerWidth, window.innerHeight);
 // deliberately deferred feature). Once a camera exists, this is the
 // exact spot that'll need updating to project through it.
 canvas.addEventListener('click', (e) => {
+  if (getCurrentView() !== 'surface') return; // no click interaction defined for the underground view yet
+                                               // (the future container-expansion action is the first
+                                               // candidate — see ROADMAP.md Phase B)
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
@@ -59,9 +69,14 @@ canvas.addEventListener('click', (e) => {
 // 'T' toggles the pheromone trail overlay on/off — purely visual, has
 // no effect on the actual simulation (ants still deposit/sense/decay
 // the trail normally underneath, this just stops drawing it).
+// 'V' toggles between the surface and underground views (ROADMAP.md
+// Phase B) — also purely a rendering switch; the simulation underneath
+// keeps running in both views regardless of which one is on screen.
 window.addEventListener('keydown', (e) => {
   if (e.key === 't' || e.key === 'T') {
     toggleTrailVisibility();
+  } else if (e.key === 'v' || e.key === 'V') {
+    toggleView();
   }
 });
 

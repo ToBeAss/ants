@@ -3,7 +3,7 @@
 // (swap-and-pop on kill) — use `id` + idToIndex for anything that
 // needs to reference a specific ant persistently (favorites, names).
 // ============================================================
-import { MAX_ANTS, STATE_IDLE, WALK_FRAME_COUNT } from './config.js';
+import { MAX_ANTS, STATE_IDLE, WALK_FRAME_COUNT, DOMAIN_SURFACE } from './config.js';
 import { nest } from './world.js';
 
 export const ants = {
@@ -18,6 +18,8 @@ export const ants = {
   carrying: new Uint8Array(MAX_ANTS),    // 1 while returning to nest with food, else 0
   homeVectorX: new Float32Array(MAX_ANTS), // path-integration estimate: (believed) displacement from nest
   homeVectorY: new Float32Array(MAX_ANTS),
+  domain: new Uint8Array(MAX_ANTS),      // DOMAIN_SURFACE or DOMAIN_UNDERGROUND — which view this ant
+                                          // currently exists in (see underground.js's entrance linkage)
   id: new Uint32Array(MAX_ANTS),
   count: 0,
 };
@@ -39,6 +41,7 @@ export function spawnAnt(x, y) {
   ants.carrying[i] = 0;
   ants.homeVectorX[i] = x - nest.x; // accurate at spawn — drift only accumulates from movement onward
   ants.homeVectorY[i] = y - nest.y;
+  ants.domain[i] = DOMAIN_SURFACE;
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -62,6 +65,7 @@ export function killAnt(index) {
     ants.carrying[index] = ants.carrying[last];
     ants.homeVectorX[index] = ants.homeVectorX[last];
     ants.homeVectorY[index] = ants.homeVectorY[last];
+    ants.domain[index] = ants.domain[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

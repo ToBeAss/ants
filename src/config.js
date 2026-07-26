@@ -221,3 +221,44 @@ export const OBSTACLE_RADIUS = 25;       // px — size of a placed rock
 // world.js's physical environment layout. First consumer: the queen's
 // egg-laying rate, once she exists (see ROADMAP.md Phase C).
 export const FOOD_VALUE_PER_DELIVERY = 1; // added to colony.food per completed dropoff
+
+// Underground — side-view tunnel grid (underground.js, ROADMAP.md Phase
+// B). Grid cell size mirrors PHEROMONE_CELL_SIZE's role: coarse enough
+// to be cheap, fine enough that a dug chamber/tunnel reads as a shape
+// rather than a single giant block.
+export const UNDERGROUND_CELL_SIZE = 8;                // px — world-space size of one grid cell
+export const UNDERGROUND_CHAMBER_RADIUS = 40;          // px — initial hand-dug starting chamber at the entrance,
+                                                         // so the queen (Phase C) and first brood (Phase D) have
+                                                         // somewhere to be before any digging happens
+export const UNDERGROUND_UNLOCKED_RADIUS_INITIAL = 60; // px — "test tube"-sized diggable region at start (see
+                                                         // ROADMAP.md's containment framing) — must comfortably
+                                                         // exceed UNDERGROUND_CHAMBER_RADIUS so the starting
+                                                         // chamber fits inside the starting unlocked region
+export const UNDERGROUND_UNLOCKED_RADIUS_EXPAND = 50;   // px — growth per container-expansion action. Not yet
+                                                         // wired to input (that's a later Phase B checklist item);
+                                                         // expandUnlockedRegion() is ready for main.js to call
+
+// Tunnel movement (underground.js's avoidTunnelWalls()) — mirrors
+// AVOID_* above (same continuous-steering paradigm, dirt cells treated
+// as blocking mass), but kept as its OWN constants rather than reused
+// ones: grid-cell geometry (blocky, cell-quantized) isn't the same as
+// the analytic wall/circle distances avoidSurfaces() reasons about, so
+// this will likely need its own separate tuning pass once ants actually
+// move underground (not yet wired into sim.js — see underground.js).
+export const TUNNEL_AVOID_MARGIN = 12;          // px
+export const TUNNEL_AVOID_STEER_BASE = 1.0;     // rad/sec — kept loose, same "don't trap an ant in a stable
+                                                 // orbit with no corner to escape through" lesson as
+                                                 // AVOID_STEER_BASE (see CLAUDE.md), doubly relevant here since
+                                                 // dug tunnels can easily curve into pockets
+export const TUNNEL_AVOID_STEER_URGENCY = 12.0; // rad/sec — the term that must win decisively head-on
+export const TUNNEL_AVOID_HUG_FRACTION = 0.85;  // 0-1 — target closeness once hugging a tunnel wall
+
+// Ant domain — which view an ant currently exists in (entrance
+// linkage, ROADMAP.md Phase B). Every ant starts on the surface;
+// nothing currently moves an ant to DOMAIN_UNDERGROUND — the first
+// real consumer is the digging task, still later in Phase B. Until
+// then enterUnderground()/exitToSurface() (underground.js) exist with
+// no caller, same "ready, not yet wired" state avoidTunnelWalls() is
+// already in.
+export const DOMAIN_SURFACE = 0;
+export const DOMAIN_UNDERGROUND = 1;
