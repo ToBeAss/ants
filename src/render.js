@@ -5,14 +5,16 @@
 import { ants } from './ants.js';
 import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
+import { getSpoil } from './spoil.js';
 import { drawUnderground } from './undergroundRender.js';
-import { drawAnt, SPRITE_ANGLE_OFFSET } from './antSprite.js';
+import { drawAnt, drawCarryIndicator, SPRITE_ANGLE_OFFSET } from './antSprite.js';
 import {
   SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
   NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
   PHEROMONE_COLOR, PHEROMONE_MAX,
   DOMAIN_SURFACE,
   GROUND_COLOR, NEST_COLOR, FOOD_COLOR, OBSTACLE_COLOR, CARRY_MARKER_COLOR,
+  SOIL_MARKER_COLOR, SPOIL_COLOR,
 } from './config.js';
 
 export const canvas = document.getElementById('canvas');
@@ -90,7 +92,29 @@ function drawPheromones() {
   ctx.drawImage(pheromoneCanvas, 0, 0, cols, rows, 0, 0, window.innerWidth, window.innerHeight);
 }
 
+// The crater of excavated earth around the entrance (spoil.js). Drawn
+// BEFORE the nest marker so the marker stays the hole in the middle, and
+// as annular wedges per angular bin — the rim creeps outward in whichever
+// directions the colony has been dumping.
+function drawSpoilMound() {
+  const { bins, binCount, binArc, innerRadius, bandWidth, fullHeight, cx, cy } = getSpoil();
+  ctx.fillStyle = SPOIL_COLOR;
+  for (let b = 0; b < binCount; b++) {
+    if (bins[b] <= 0) continue;
+    const outer = innerRadius + Math.min(1, bins[b] / fullHeight) * bandWidth;
+    const a0 = b * binArc;
+    const a1 = a0 + binArc;
+    ctx.beginPath();
+    ctx.arc(cx, cy, outer, a0, a1);
+    ctx.arc(cx, cy, innerRadius, a1, a0, true);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 function drawWorld() {
+  drawSpoilMound();
+
   // nest — simple dirt-mound marker
   ctx.beginPath();
   ctx.arc(nest.x, nest.y, NEST_DRAW_RADIUS, 0, Math.PI * 2);
@@ -113,14 +137,6 @@ function drawWorld() {
     ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
     ctx.fill();
   }
-}
-
-function drawCarryIndicator(x, y) {
-  // small morsel marker on top of an ant currently returning with food
-  ctx.beginPath();
-  ctx.arc(x, y, 2, 0, Math.PI * 2);
-  ctx.fillStyle = CARRY_MARKER_COLOR;
-  ctx.fill();
 }
 
 // View toggle — 'V' switches between the surface and underground draw
@@ -155,7 +171,10 @@ function drawSurface() {
     // drawAntShadow(ants.x[i], ants.y[i], ants.rotation[i]); // disabled for now — see config.js for tuning notes if re-enabling
     drawAnt(ctx, ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
     if (ants.carrying[i]) {
-      drawCarryIndicator(ants.x[i], ants.y[i]);
+      drawCarryIndicator(ctx, ants.x[i], ants.y[i], CARRY_MARKER_COLOR);
+    } else if (ants.carryingSoil[i]) {
+      // A digger that hauled a pellet up and is walking it out to the mound.
+      drawCarryIndicator(ctx, ants.x[i], ants.y[i], SOIL_MARKER_COLOR);
     }
   }
 }

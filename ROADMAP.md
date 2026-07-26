@@ -113,6 +113,50 @@ Currently a carved cell just becomes tunnel and the soil ceases to exist. Real e
 
 Sequential/relay transport (excavator drops the pellet near the face, a second ant carries it onward) is real and documented but skipped: it's a second task state for a detail the viewer won't read at this zoom.
 
+### Phase B3 status — landed 2026-07-26
+
+- [x] **A pellet per carved cell.** `ants.carryingSoil`, set when a carve completes, which also forces the ant out of the nest before it may claim another cell. Diggers now visibly commute instead of standing still for ~87% of their lives.
+- [x] **A growing surface crater.** New `spoil.js` — an angular histogram of pile height around the entrance, with the deposit rule from the crater-optimization work ("nearest bin whose pile is below optimal"). Verified filling 23-24 of 24 directions evenly with no coordination. The nest is in a screen corner, so off-world bins are skipped and the colony correctly piles on the side it has room for.
+- [x] **Visible in both views.** `drawCarryIndicator()` moved into `antSprite.js` (it's "how an ant looks", and both views need it — having `undergroundRender.js` import it from `render.js` created a cycle and broke the deliberate separation of the two draw paths). Same marker as food, in earth instead of green.
+- [ ] **Pellets as a stigmergic cue.** Not done — deferred to B4's aggregation bullet, where it belongs.
+
+Sequential/relay transport (excavator drops the pellet near the face, a second ant carries it onward) remains skipped: real and documented, but a second task state for a detail invisible at this zoom.
+
+### The tunnel-burial bug, and a steering lesson (fixed 2026-07-26)
+
+Reported symptom: ants sometimes walk into the dirt underground. Measured: **14.6% of all underground ant-time was spent with the ant's centre inside solid dirt**, in burials of up to 45 seconds.
+
+Cause was a missing backstop, not bad steering. The surface movement tail has hard position clamps for both walls and obstacles; `sim.js`'s underground tail had only a grid-bounds clamp, so `avoidTunnelWalls()` was the *sole* thing keeping ants out of the earth — and it structurally cannot hold a corridor, because a corridor (20px) is narrower than `TUNNEL_AVOID_MARGIN` (12px on each side), so opposing pushes cancel to zero. That cancellation was already known and written off in a config comment as a rare symmetric squeeze; it is in fact the normal case for every corridor in the nest.
+
+`pushOutOfDirt()` (underground.js, called from `sim.js`) fixes it completely: **14.6% → 0.00%**. It re-aims the ant at the opening as well as repositioning it, because otherwise a clamped ant keeps its old heading and walks straight back in.
+
+**The lesson, which cost a round trip: a forward "feeler" probe was also built, and it was actively harmful.** It looked like the right fix for the cancellation problem — probe ahead, turn toward the most open direction. Measured against a control it was worse on every axis: dig throughput **fell 36%** (85 carved cells → 54), heading reversals rose 31%, and ants walked 28% further to achieve less. Two reasons, both worth remembering:
+
+1. **Every dig target IS a dirt cell.** "Steer away from dirt ahead" directly opposes "walk to the dirt you came to remove", and avoidance wins — so diggers could never close on a target. This is a general hazard for any future avoidance behaviour: the underground is a domain where agents deliberately approach the hazard.
+2. **A probe that reacts to the nearest wall ping-pongs**, because turning away from one wall presents the other. Making it proportional rather than bang-bang reduced but did not remove this.
+
+It was deleted. `config.js` carries a note where the constants were, so it doesn't get reinvented. The clamp needs no steering change at all to work. (The 36%/31% figures above came from single stochastic runs and were later shown to be within run-to-run noise — the harnesses are seeded now. The *mechanism* stands and the user observed the ping-ponging directly, but don't quote those numbers.)
+
+**And the actual dominant bug, found from a screenshot after all of the above: `TUNNEL_AVOID_HUG_FRACTION` was 0.85.** Copied from `AVOID_HUG_FRACTION`, where wall-hugging is correct — following an edge is useful on open sand. Underground it sets the target standoff from a dirt face to ~1.8px, so ants pressed themselves flat against the wall and their ~12px sprite was drawn mostly over solid earth. That is what "ants get stuck in the dirt" actually looked like, and no centre-based metric could see it: the ant's centre was in legal open tunnel 100% of the time while **91% of samples had the body overlapping dirt**.
+
+Dropping it to 0.2 (≈9.6px standoff, which centres an ant in a 20px corridor) fixed far more than the visual:
+
+| | before | after |
+|---|---|---|
+| sprite overlapping dirt | 91% | 2.4% |
+| heading reversals (moving ants) | 10-13/s | 2.3-3.0/s |
+| cells carved per 1200s | 12-85 per *2400s* | 111-119 |
+
+Ants had been grinding along walls rather than walking, which is why throughput was so low and so erratic — and why the earlier feeler A/B was measuring noise on top of a much larger problem. **Lesson: the underground is not the surface with different constants.** Every `TUNNEL_*` value inherited from an `AVOID_*` one deserves the same scrutiny; the remaining ones (margin, steer base, steer urgency) have not had it.
+
+Also fixed in the same pass, both found by seeding the harnesses (single unseeded runs had been passing by luck):
+- **Enlargement was all-or-nothing.** It grew by exactly `+CHAMBER_ENLARGE_STEP` or gave up, so any room whose full step didn't fit was frozen at its dug size forever — the same frozen-at-dig-time artifact `purposeOf()` fixed, for radius. `fittableRadiusAt()` now returns the largest radius that fits (depth cap, world edges, inter-chamber gap, shaft) and both enlargement and new placement size to it instead of being rejected.
+- **Enlargement ignored world bounds**, growing chambers off the edge of the world (one reached `x=32` with `r=34`). Same helper covers it.
+- **The founding chamber was carved with no fit check at all**, so with the nest in a screen corner it could breach the world edge — and the edge then pinned its fittable radius to ~5px, meaning it could never be enlarged and stayed permanently smaller than every room above it, inverting the architecture's core relationship. Its centre is now inset far enough for the full radius to fit.
+- **Chamber side is now chosen by which side has more room**, not at random, so rooms aren't squeezed by the nearby wall instead of by their depth.
+
+Note on what is *not* guaranteed: chamber radius is **not** pairwise monotonic in depth. A room is sized for the depth it was dug at, and enlargement stops once its stratum's demand is met, so a room dug early can stay smaller than one dug later and deeper. The aggregate distribution is what's asserted (shallow half larger than deep half; shallowest larger than deepest), which is also what the source biology actually claims.
+
 ### Phase B4 — Regulate digging by crowding, not by counters (added 2026-07-26)
 
 Demand-driven digging was the right call and the biology backs it — colonies measurably dig *less* once available space is adequate. But the current rules measure the wrong thing. `ANTS_PER_BROOD_CHAMBER` (60) and `FOOD_PER_STORAGE_CHAMBER` (50) are arbitrary discrete counters, and `DIG_FORCE_MAX` (8) is a hard cap standing in for a self-organizing process.

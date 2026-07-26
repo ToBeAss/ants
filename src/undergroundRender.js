@@ -13,12 +13,12 @@ import {
   getChambers, getActiveProject, getQueenChamber, purposeOf,
   PURPOSE_ATRIUM, PURPOSE_BROOD, PURPOSE_FOOD,
 } from './nestPlan.js';
-import { drawAnt } from './antSprite.js';
+import { drawAnt, drawCarryIndicator } from './antSprite.js';
 import {
   DOMAIN_UNDERGROUND,
   UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR, ENTRANCE_COLOR,
   CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD,
-  CHAMBER_COLOR_ATRIUM, PLAN_COLOR,
+  CHAMBER_COLOR_ATRIUM, PLAN_COLOR, SOIL_MARKER_COLOR,
 } from './config.js';
 
 // Parsed once from the palette above, for the carve-progress blend —
@@ -153,5 +153,11 @@ export function drawUnderground(ctx) {
   for (let i = 0; i < ants.count; i++) {
     if (ants.domain[i] !== DOMAIN_UNDERGROUND) continue;
     drawAnt(ctx, ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
+    if (ants.carryingSoil[i]) {
+      // Same marker the surface view uses for a food-carrying ant, in earth
+      // instead of green — so a digger hauling its pellet up the shaft reads
+      // as carrying something in the view where it does most of the walking.
+      drawCarryIndicator(ctx, ants.x[i], ants.y[i], SOIL_MARKER_COLOR);
+    }
   }
 }

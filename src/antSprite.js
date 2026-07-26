@@ -79,3 +79,20 @@ export function drawAnt(ctx, x, y, angle, animPhase) {
     drawFallback(ctx, x, y, angle);
   }
 }
+
+// Small marker on top of an ant carrying something. Lives here, with the
+// sprite, because it's part of how an ant LOOKS and because both views need
+// it — putting it in render.js and importing it from undergroundRender.js
+// made the two draw paths import each other, which the project
+// deliberately keeps separate (see CLAUDE.md's dual-screen note).
+//
+// Colour is the only difference between a food morsel and a spoil pellet:
+// same size, same position, because it's the same gesture — this ant's
+// mandibles are full. Both markers are LIGHT, since they sit on a black
+// silhouette rather than on the ground.
+export function drawCarryIndicator(ctx, x, y, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, 2, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}

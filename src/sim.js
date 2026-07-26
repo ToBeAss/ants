@@ -9,7 +9,7 @@ import { updateIdleState, wander, avoidSurfaces, integrate, separationSteer } fr
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
 import { checkDigRecruitment, updateDigging } from './digging.js';
 import { updateNestPlan } from './nestPlan.js';
-import { avoidTunnelWalls } from './underground.js';
+import { avoidTunnelWalls, pushOutOfDirt } from './underground.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
 import { rebuildSpatialGrid } from './spatialGrid.js';
 import { obstacles } from './world.js';
@@ -79,6 +79,14 @@ export function simStep(dt) {
         if (Math.random() < DIG_TWITCH_CHANCE * dt) {
           ants.rotation[i] += (Math.random() - 0.5) * DIG_TWITCH_AMOUNT;
         }
+        // The dirt backstop still applies while frozen. This path `continue`s
+        // before the movement tail, so a carving ant used to be exempt from
+        // it for the whole 9-16s of a carve — by far the worst place to have
+        // that gap, since a carver is the one ant guaranteed to be standing
+        // against a dirt face, and it holds still long enough for anyone
+        // watching to see it embedded in the earth. A centre-in-dirt check
+        // over moving ants reported 0% and completely missed this.
+        if (ants.domain[i] === DOMAIN_UNDERGROUND) pushOutOfDirt(ants, i);
         continue;
       }
     } else {
@@ -122,6 +130,14 @@ export function simStep(dt) {
       if (ants.x[i] > w - ANT_LENGTH) ants.x[i] = w - ANT_LENGTH;
       if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
       if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
+
+      // ...and out of solid dirt, the underground counterpart of the
+      // obstacle clamp at the bottom of the surface tail. This domain had
+      // no such backstop, which made avoidTunnelWalls() the ONLY thing
+      // keeping ants out of the earth — and it can't hold a narrow
+      // corridor on its own (see underground.js). Ants were spending
+      // 14.6% of their underground time buried before this was added.
+      pushOutOfDirt(ants, i);
       continue;
     }
 

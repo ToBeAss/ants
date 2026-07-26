@@ -52,6 +52,13 @@ export const OBSTACLE_COLOR = '#9a9187';  // stone, warmed slightly so it sits i
                                            // instead of reading as a cold grey hole in the picture
 export const CARRY_MARKER_COLOR = '#bcf07a'; // the morsel on a carrying ant — deliberately LIGHTER than
                                            // FOOD_COLOR: it's drawn on top of a black sprite, not on sand
+export const SOIL_MARKER_COLOR = '#e0bd8b'; // the spoil pellet on a hauling ant. Same reasoning as
+                                           // CARRY_MARKER_COLOR — light, because it sits on the black sprite in
+                                           // BOTH views. Warm earth, so it never reads as food.
+export const SPOIL_COLOR = '#d6b585';     // the crater of excavated earth around the entrance. Darker than
+                                           // GROUND_COLOR so the mound is legible, but kept well clear of the ant
+                                           // sprite's value — ants walk on it, and the palette rule is never to
+                                           // darken a surface ants walk on (see the note above)
 
 // Underground. The old palette had this exactly backwards for
 // legibility: dirt was mid-brown (#7a5230) and dug tunnels were nearly
@@ -316,7 +323,42 @@ export const TUNNEL_AVOID_STEER_BASE = 1.0;     // rad/sec — kept loose, same 
                                                  // AVOID_STEER_BASE (see CLAUDE.md), doubly relevant here since
                                                  // dug tunnels can easily curve into pockets
 export const TUNNEL_AVOID_STEER_URGENCY = 12.0; // rad/sec — the term that must win decisively head-on
-export const TUNNEL_AVOID_HUG_FRACTION = 0.85;  // 0-1 — target closeness once hugging a tunnel wall
+export const TUNNEL_AVOID_HUG_FRACTION = 0.2;   // 0-1 — how close an ant WANTS to sit to a tunnel wall. Was 0.85,
+                                                 // copied from AVOID_HUG_FRACTION, and that was the real cause of
+                                                 // ants looking buried: at 0.85 the target standoff is ~1.8px, so
+                                                 // ants pressed themselves against the dirt face and their sprite
+                                                 // (about 12px long) was drawn mostly over solid earth — 91% of all
+                                                 // underground samples had the body overlapping dirt, even with the
+                                                 // ant's centre legally in open tunnel 100% of the time.
+                                                 //
+                                                 // Hugging is right on the SURFACE, where following an edge is
+                                                 // useful and the ant is a small dark shape on open sand. It is
+                                                 // exactly wrong in a 20px-wide corridor cut into a dark mass: what
+                                                 // reads correctly there is walking down the middle. At 0.2 the
+                                                 // standoff is ~9.6px, which centres an ant in a corridor.
+
+// There is deliberately NO forward-probe/"feeler" steering here, and it's
+// worth knowing why, because adding one is an obvious-looking idea.
+//
+// The push logic above genuinely does go silent in a corridor: a corridor is
+// 2*NEST_TUNNEL_RADIUS (20px) wide against a TUNNEL_AVOID_MARGIN of 12, so
+// dirt sits within margin on BOTH sides and the pushes cancel to nothing.
+// That looks like it needs a probe ahead to fix. It was built (probe ahead,
+// turn toward the most open direction) and measured against a control, and
+// it was worse on every axis: dig throughput fell 36% (85 carved cells ->
+// 54), heading reversals rose 31%, and ants walked 28% further to do less.
+//
+// Two reasons. Every dig target IS a dirt cell, so "steer away from dirt
+// ahead" is in direct opposition to "walk to the dirt you came to remove" —
+// and avoidance wins. And a probe that reacts to whichever wall is nearest
+// ping-pongs, because turning away from one wall presents the other.
+//
+// What actually fixed ants walking into the earth was the missing hard
+// position clamp (pushOutOfDirt, called from sim.js) — the same backstop the
+// surface path already had for walls and obstacles, and which this domain
+// simply never got. It takes burial from 14.6% of underground time to 0.00%
+// on its own, with no steering change at all. Reach for the clamp, not a
+// cleverer controller.
 
 // Ant domain — which view an ant currently exists in (entrance
 // linkage, ROADMAP.md Phase B). Every ant starts on the surface;
@@ -368,6 +410,34 @@ export const DIG_EXIT_TIMEOUT = 45;      // seconds — backstop on the walk bac
                                           // reason; on expiry the ant surfaces regardless of where it got to,
                                           // same spirit as sim.js's hard position clamps
 
+// Spoil (spoil.js) — the excavated earth. A carved cell used to just become
+// tunnel with the dirt vanishing; now a digger carries a pellet up and out
+// and drops it on a growing crater around the entrance, the way real
+// ground-nesting colonies do. Visible in both views (a hauling ant wears a
+// marker exactly like a food-carrying one) and persistent — the mound is an
+// accumulating record of how much this colony has dug.
+export const SPOIL_BIN_COUNT = 24;       // angular bins around the entrance the crater is tracked in — a crater is
+                                          // radially symmetric to a first approximation, so a heightfield would be
+                                          // a lot of machinery for the same picture
+export const SPOIL_INNER_RADIUS = 26;    // px — inner edge of the mound, just clear of NEST_DRAW_RADIUS so the
+                                          // nest marker still reads as the hole in the middle
+export const SPOIL_BAND_WIDTH = 30;      // px — how far out the rim creeps once a direction is fully piled
+export const SPOIL_HEIGHT_PER_PELLET = 1; // one carved cell = one pellet
+export const SPOIL_FULL_HEIGHT = 26;     // pellets in one bin before that direction is piled as high as it gets
+                                          // (further pellets there stop pushing the rim outward)
+export const SPOIL_LEVEL_TOLERANCE = 1.5; // pellets — how far above the lowest pile still counts as "below
+                                          // optimal". This is what stops every hauler walking to the single
+                                          // globally-lowest bin: several bins are usually tied, so each ant takes
+                                          // the nearest of them and the crater fills evenly on its own
+export const SPOIL_EDGE_MARGIN = 14;     // px — dump points must stay this far inside the world. The nest is in a
+                                          // corner, so half the crater's directions are off-world and the colony
+                                          // correctly piles on the side it has room for
+export const SPOIL_DROP_RADIUS = 9;      // px — close enough to the chosen rim point to drop the pellet
+export const SPOIL_HAUL_TIMEOUT = 25;    // seconds — give-up bound on the walk to the rim, same role as
+                                          // DIG_TRAVEL_TIMEOUT. On expiry the pellet is dropped where the ant
+                                          // stands (still binned by direction), so spoil is never destroyed and a
+                                          // wall-hugged hauler can't hold a dig-force slot forever
+
 // Nest planning (nestPlan.js) — the colony decides WHAT to excavate and
 // WHEN, and diggers carry out that plan. Chambers exist for a purpose and
 // are only dug once the colony actually needs one: a nest that expands
@@ -411,7 +481,14 @@ export const SHAFT_MARGIN = 20;          // px — keep the shaft (and chambers)
 // the shaft straight to the bottom of the world at three times the
 // population that should have reached it.
 export const NEST_DEPTH_ALLOMETRY = 0.38;      // log10(2.4) — the measured exponent
-export const NEST_DEPTH_REFERENCE_POP = 100;   // population SHAFT_INITIAL_DEPTH corresponds to
+export const NEST_DEPTH_REFERENCE_POP = 15;    // workers the FOUNDING nest's depth corresponds to. Small on
+                                          // purpose: founding is one queen and her first cohort, so the starting
+                                          // INITIAL_ANT_COUNT colony has already grown well past it and should
+                                          // have expansion work waiting on day one. Set to 100 at first, which
+                                          // meant a 100-ant colony was treated as exactly fitting its founding
+                                          // nest — it had a space deficit it was structurally forbidden from
+                                          // acting on, so it dug nothing at all and the underground view sat
+                                          // static until the player dropped food.
 
 // --- Chambers hang off the shaft ---
 export const CHAMBER_STUB_LENGTH = 14;   // px — the short lateral neck from shaft to chamber. Short by

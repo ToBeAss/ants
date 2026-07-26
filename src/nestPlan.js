@@ -166,6 +166,10 @@ let chambers = [];
 let shaft = [];
 let shaftSide = 1; // which way the next segment prefers to lean; flips each segment (the zig-zag)
 
+// Depth the founding nest actually reached at init — the reference the
+// allometric depth cap scales from (see maxNestDepth).
+let foundingDepth = 0;
+
 // Project kinds. A chamber is what the colony actually wants; a shaft
 // extension is the prerequisite it digs when no band has room yet.
 const KIND_CHAMBER = 'chamber';   // a new room off the shaft
@@ -215,8 +219,29 @@ export function initNestPlan() {
   }
 
   const bottom = shaft[shaft.length - 1];
-  carveDisc(bottom.x, bottom.y, FOUNDING_CHAMBER_RADIUS);
-  chambers.push({ x: bottom.x, y: bottom.y, radius: FOUNDING_CHAMBER_RADIUS });
+  foundingDepth = depthOf(bottom.y);
+
+  // Centred on the shaft's end, but pulled inward far enough that the whole
+  // room fits inside the world. The nest sits in a screen corner (world.js),
+  // and the founding shaft can end up within a radius of the wall — which
+  // broke two things at once: the room visibly ran off the edge of the world,
+  // and because fittableRadiusAt() then measured almost no room to that wall,
+  // the founding chamber could never be enlarged and stayed permanently
+  // smaller than the rooms dug above it, inverting the whole
+  // shallow-rooms-are-bigger relationship the architecture is built on.
+  //
+  // Shifting the centre is safe: the offset is bounded by SHAFT_MARGIN (20),
+  // less than FOUNDING_CHAMBER_RADIUS, so the room still swallows the shaft
+  // node it hangs off and stays connected.
+  const { cols, rows, cellSize } = getGridSize();
+  const worldW = cols * cellSize;
+  const worldH = rows * cellSize;
+  const inset = FOUNDING_CHAMBER_RADIUS + SHAFT_MARGIN;
+  const cx = Math.max(inset, Math.min(worldW - inset, bottom.x));
+  const cy = Math.max(inset, Math.min(worldH - inset, bottom.y));
+
+  carveDisc(cx, cy, FOUNDING_CHAMBER_RADIUS);
+  chambers.push({ x: cx, y: cy, radius: FOUNDING_CHAMBER_RADIUS });
 }
 
 export function getChambers() {
@@ -457,25 +482,31 @@ function planProject(purpose) {
 // work on the same room at once instead of queueing down a corridor.
 function planEnlargement(purpose) {
   let best = null;
+  let bestRadius = 0;
   let bestGain = 0;
 
   for (const c of chambers) {
     if (purposeOf(c) !== purpose) continue;
-    const gain = chamberSizeCapAtDepth(depthOf(c.y)) - c.radius;
+    // Grow by a step, or by whatever actually fits if a step is too much.
+    // Taking the fit into account HERE rather than checking it afterwards is
+    // the point: an all-or-nothing "+step or nothing" version gave up
+    // entirely whenever the full step didn't fit, so rooms dug early — small,
+    // because they were the deepest in the nest at the time — stayed stuck at
+    // their original size forever even after the nest grew far below them.
+    // That's the same frozen-at-dig-time artifact deriving purposeOf() fixed,
+    // just for radius instead of job.
+    const fit = fittableRadiusAt(c.x, c.y, depthOf(c.y), c);
+    const radius = Math.min(c.radius + CHAMBER_ENLARGE_STEP, fit);
+    const gain = radius - c.radius;
     if (gain > bestGain) {
       bestGain = gain;
+      bestRadius = radius;
       best = c;
     }
   }
   if (!best || bestGain < CHAMBER_ENLARGE_MIN_GAIN) return null;
 
-  const depth = depthOf(best.y);
-  const radius = Math.min(best.radius + CHAMBER_ENLARGE_STEP, chamberSizeCapAtDepth(depth));
-
-  // At the bigger size it must still leave dirt between itself and its
-  // neighbours — ignoring itself, which it obviously overlaps.
-  if (!hasClearance(best.x, best.y, radius, depth, best)) return null;
-
+  const radius = bestRadius;
   const pending = new Map();
   addDisc(pending, best.x, best.y, radius);
   if (pending.size === 0) return null; // somehow already that big
@@ -497,37 +528,43 @@ function planChamber(purpose) {
   const total = shaftDepth();
   if (!band || total <= 0) return null;
 
-  const { cols, rows, cellSize } = getGridSize();
+  const { cols, rows } = getGridSize();
   if (cols === 0 || rows === 0) return null;
-  const worldW = cols * cellSize;
-  const worldH = rows * cellSize;
 
   for (let attempt = 0; attempt < NEST_SITE_ATTEMPTS; attempt++) {
     const d = (band[0] + Math.random() * (band[1] - band[0])) * total;
-
-    // A room can't breach the surface it hangs under, and a colony won't
-    // settle for a badly stunted one — it waits until the nest is deep
-    // enough to hang a proper room there. This is why an incipient nest
-    // has no big top chambers: the headroom simply isn't there yet, and
-    // digging a token 15px "atrium" 30px down would permanently occupy
-    // the spot where a real one belongs.
     const target = chamberTargetRadiusAtDepth(d);
-    const radius = chamberSizeCapAtDepth(d);
-    if (radius < target * CHAMBER_STUNT_LIMIT) continue;
-
     const attach = shaftPointAtDepth(d);
 
-    // Hangs off one side of the shaft on a short stub. Both sides tried,
-    // in random order, so the nest doesn't consistently favour one hand.
-    const sides = Math.random() < 0.5 ? [-1, 1] : [1, -1];
-    for (const side of sides) {
-      const x = attach.x + side * (CHAMBER_STUB_LENGTH + radius);
-      const y = attach.y;
+    // Hangs off one side of the shaft on a short stub. Both sides are
+    // measured and the roomier one wins, rather than picking at random and
+    // taking the first that merely fits.
+    //
+    // That matters because the nest sits in a screen corner (world.js), so
+    // the shaft runs close to one wall: a room hung on the wall side gets
+    // squeezed by the world edge instead of by its depth, which quietly
+    // breaks the whole shallow-rooms-are-bigger relationship the
+    // architecture rests on. Choosing by available room also just reads as
+    // sensible excavation — dig where there's earth to dig into.
+    let x = 0, y = attach.y, radius = -1;
+    for (const side of [-1, 1]) {
+      const sx = attach.x + side * (CHAMBER_STUB_LENGTH + target);
+      const sr = fittableRadiusAt(sx, attach.y, d);
+      // Ties broken randomly so a nest in open ground doesn't favour a hand.
+      if (sr > radius || (sr === radius && Math.random() < 0.5)) {
+        radius = sr;
+        x = sx;
+      }
+    }
 
-      if (x - radius < SHAFT_MARGIN || x + radius > worldW - SHAFT_MARGIN) continue;
-      if (y - radius < SHAFT_MARGIN || y + radius > worldH - SHAFT_MARGIN) continue;
-      if (!hasClearance(x, y, radius, d)) continue;
+    // A colony won't settle for a badly stunted room — it waits until
+    // there's somewhere better. This is why an incipient nest has no big
+    // top chambers: the surface overhead isn't there yet, and digging a
+    // token 15px "atrium" 30px down would permanently occupy the spot
+    // where a real one belongs.
+    if (radius < target * CHAMBER_STUNT_LIMIT) continue;
 
+    {
       const pending = layOutChamber(attach, x, y, radius);
       if (pending.size === 0) continue; // nothing left to dig here (already open ground)
 
@@ -556,8 +593,13 @@ function maxNestDepth() {
   const { rows, cellSize } = getGridSize();
   const worldFloor = rows * cellSize - SHAFT_MARGIN;
   const pop = Math.max(1, ants.count);
+  // Scaled from the depth the founding nest ACTUALLY reached, not from
+  // SHAFT_INITIAL_DEPTH: the founding loop digs whole segments, so it
+  // overshoots its target by up to a segment. Scaling from the config
+  // value instead put the cap BELOW the nest that already existed, which
+  // forbade deepening from the very first tick.
   const allometric =
-    SHAFT_INITIAL_DEPTH * Math.pow(pop / NEST_DEPTH_REFERENCE_POP, NEST_DEPTH_ALLOMETRY);
+    foundingDepth * Math.pow(pop / NEST_DEPTH_REFERENCE_POP, NEST_DEPTH_ALLOMETRY);
   return Math.min(worldFloor, allometric);
 }
 
@@ -585,28 +627,50 @@ function planShaftExtension() {
   };
 }
 
-// Keeps real dirt between rooms, so the nest reads as separate chambers
-// rather than one merged cavity — and the gap WIDENS with depth, matching
-// measured vertical spacing (2-4cm near the surface, 20-30cm deep).
-function hasClearance(x, y, radius, depth, ignore = null) {
-  const gap = chamberClearanceAtDepth(depth);
+// The largest radius a room centred here may have — every constraint on
+// chamber size in one place, returning a SIZE rather than a yes/no.
+//
+// That shape matters. As a boolean "does radius R fit here?" this was asked
+// with a radius already chosen, so a spot that could take a slightly smaller
+// room was simply rejected: new chambers were skipped where one nearly fit,
+// and enlargement gave up entirely whenever its full step didn't fit,
+// permanently freezing rooms at the size they were dug. Returning the fit
+// lets both callers size to the spot instead.
+//
+// Constraints, in order: what the depth calls for and the surface overhead
+// allows (chamberSizeCapAtDepth), the world edges, the dirt left between
+// rooms — which WIDENS with depth, matching measured spacing of 2-4cm near
+// the surface against 20-30cm deep — and finally the shaft itself.
+function fittableRadiusAt(x, y, depth, ignore = null) {
+  const { cols, rows, cellSize } = getGridSize();
+  const worldW = cols * cellSize;
+  const worldH = rows * cellSize;
 
+  let limit = chamberSizeCapAtDepth(depth);
+
+  // World edges. Enlargement skipped this check when it was a separate
+  // boolean, and rooms near the corner-placed nest grew straight out of the
+  // world (one reached x = 32 with radius 34).
+  limit = Math.min(limit, x - SHAFT_MARGIN, worldW - SHAFT_MARGIN - x);
+  limit = Math.min(limit, y - SHAFT_MARGIN, worldH - SHAFT_MARGIN - y);
+
+  const gap = chamberClearanceAtDepth(depth);
   for (const c of chambers) {
     if (c === ignore) continue; // widening a room: it overlaps itself by definition
-    if (Math.hypot(x - c.x, y - c.y) < c.radius + radius + gap) return false;
+    limit = Math.min(limit, Math.hypot(x - c.x, y - c.y) - c.radius - gap);
   }
 
-  // Also don't let a room swallow a length of shaft it isn't attached to.
-  // Nodes within a segment of this depth are its own local attachment
-  // (the stub cuts into the shaft on purpose); anything further away is a
-  // different part of the descent, and eating it turns a room-off-a-
-  // passage into one shapeless blob.
+  // Don't let a room swallow a length of shaft it isn't attached to. Nodes
+  // within a segment of this depth are its own local attachment (the stub
+  // cuts into the shaft on purpose); anything further away is a different
+  // part of the descent, and eating it turns a room-off-a-passage into one
+  // shapeless blob.
   for (const n of shaft) {
     if (Math.abs(depthOf(n.y) - depth) < SHAFT_SEGMENT_LENGTH) continue;
-    if (Math.hypot(x - n.x, y - n.y) < radius + gap * 0.5) return false;
+    limit = Math.min(limit, Math.hypot(x - n.x, y - n.y) - gap * 0.5);
   }
 
-  return true;
+  return limit;
 }
 
 // Builds the ordered set of cells a chamber project consists of: the

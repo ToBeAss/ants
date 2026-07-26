@@ -11,6 +11,7 @@ import { initWorld, nest, spawnFoodAt, addObstacle } from './world.js';
 import { initPheromones } from './pheromones.js';
 import { initUnderground } from './underground.js';
 import { initNestPlan } from './nestPlan.js';
+import { initSpoil } from './spoil.js';
 import { OBSTACLE_RADIUS } from './config.js';
 
 // Pheromone grid dimensions are locked in at initPheromones() and never
@@ -40,12 +41,18 @@ window.addEventListener('resize', () => {
   initPheromones(window.innerWidth, window.innerHeight);
   initUnderground(window.innerWidth, window.innerHeight);
   initNestPlan();
+  initSpoil(window.innerWidth, window.innerHeight);
 });
 resizeCanvas();
 initWorld(window.innerWidth, window.innerHeight);
 initPheromones(window.innerWidth, window.innerHeight);
 initUnderground(window.innerWidth, window.innerHeight);
 initNestPlan();
+// initSpoil() needs the viewport because the nest sits in a corner: half the
+// crater's directions point off-world and have to be excluded when choosing
+// where to dump. Reset alongside the dug grid on resize — a mound whose
+// bounds no longer match the window would let haulers walk off-screen.
+initSpoil(window.innerWidth, window.innerHeight);
 
 // Food only ever appears via click — no auto-spawn, no auto-respawn.
 // Shift+Click places an obstacle instead. getBoundingClientRect()

@@ -36,6 +36,11 @@ import { nest } from './world.js';
 export const DIRT = 0;
 export const TUNNEL = 1;
 
+// How far pushOutOfDirt() searches, in cells, for open ground to put a
+// buried ant back into. A few cells is plenty: this is a backstop for
+// steering that reacted slightly too late, not a rescue from deep burial.
+const DIRT_ESCAPE_CELLS = 5;
+
 let cols = 0;
 let rows = 0;
 let grid = new Uint8Array(0);
@@ -251,6 +256,52 @@ export function exitToSurface(ants, i) {
 //
 // Called from sim.js for every DOMAIN_UNDERGROUND ant, each tick.
 // ------------------------------------------------------------
+// Probes ahead; if the way is blocked, turns toward whichever direction has
+// the most open tunnel. Runs alongside the summed-push steering below, and
+// covers the case that steering structurally cannot: in a corridor barely
+// wider than TUNNEL_AVOID_MARGIN, dirt on opposite sides cancels to a zero
+// push vector and the ant gets no correction at all. A probe can't cancel
+// out, which is the whole point (see TUNNEL_FEELER_* in config.js).
+//
+// Hard backstop: if an ant's centre has ended up inside solid dirt, move it
+// to the nearest open cell and point it at the opening. Same role as the
+// wall and obstacle position clamps in sim.js — steering should normally
+// prevent this, but when it doesn't, an ant embedded in the earth is the
+// most obviously broken thing in the simulation, and the underground path
+// was the one movement domain with no such backstop at all.
+//
+// Re-aiming matters as much as repositioning: without it an ant clamped out
+// of a wall keeps its old heading, walks straight back in, and oscillates.
+export function pushOutOfDirt(ants, i) {
+  if (cols === 0 || rows === 0) return false;
+
+  const col = Math.floor(ants.x[i] / UNDERGROUND_CELL_SIZE);
+  const row = Math.floor(ants.y[i] / UNDERGROUND_CELL_SIZE);
+  if (isTunnelCell(col, row)) return false;
+
+  let bestDistSq = Infinity;
+  let bx = 0, by = 0;
+  for (let dr = -DIRT_ESCAPE_CELLS; dr <= DIRT_ESCAPE_CELLS; dr++) {
+    for (let dc = -DIRT_ESCAPE_CELLS; dc <= DIRT_ESCAPE_CELLS; dc++) {
+      if (!isTunnelCell(col + dc, row + dr)) continue;
+      const c = cellCenter(col + dc, row + dr);
+      const dx = c.x - ants.x[i], dy = c.y - ants.y[i];
+      const distSq = dx * dx + dy * dy;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bx = c.x;
+        by = c.y;
+      }
+    }
+  }
+  if (bestDistSq === Infinity) return false; // no open cell anywhere near — leave it be
+
+  ants.rotation[i] = Math.atan2(by - ants.y[i], bx - ants.x[i]);
+  ants.x[i] = bx;
+  ants.y[i] = by;
+  return true;
+}
+
 export function avoidTunnelWalls(ants, i, dt) {
   if (cols === 0 || rows === 0) return;
 

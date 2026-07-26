@@ -30,6 +30,15 @@ export const ants = {
                                            // bend can be unreachable (see DIG_TRAVEL_TIMEOUT)
   digExiting: new Uint8Array(MAX_ANTS),   // 1 once a digger has no work left (or gave up reaching it) and is
                                            // walking back to the entrance to cross up, else 0 (see digging.js)
+  carryingSoil: new Uint8Array(MAX_ANTS), // 1 while hauling a spoil pellet out of the nest, else 0. Separate from
+                                           // `carrying` (food) rather than sharing it: an ant can't hold both, but
+                                           // they're drawn differently, dropped in different places, and mean
+                                           // different things to every state check that reads `carrying`
+  spoilTargetX: new Float32Array(MAX_ANTS), // the point on the crater rim a hauler is walking to (spoil.js). Its
+  spoilTargetY: new Float32Array(MAX_ANTS), // own field rather than reusing digTargetX/Y, which still holds the
+                                           // UNDERGROUND cell just carved — setCellProgress() reads that, so
+                                           // aliasing a surface coordinate into it would smear carve shading onto
+                                           // an unrelated cell
   id: new Uint32Array(MAX_ANTS),
   count: 0,
 };
@@ -60,6 +69,9 @@ export function spawnAnt(x, y) {
   ants.digCarveTotal[i] = 0;
   ants.digTravelTimer[i] = 0;
   ants.digExiting[i] = 0;
+  ants.carryingSoil[i] = 0;
+  ants.spoilTargetX[i] = 0;
+  ants.spoilTargetY[i] = 0;
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -89,6 +101,9 @@ export function killAnt(index) {
     ants.digCarveTotal[index] = ants.digCarveTotal[last];
     ants.digTravelTimer[index] = ants.digTravelTimer[last];
     ants.digExiting[index] = ants.digExiting[last];
+    ants.carryingSoil[index] = ants.carryingSoil[last];
+    ants.spoilTargetX[index] = ants.spoilTargetX[last];
+    ants.spoilTargetY[index] = ants.spoilTargetY[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

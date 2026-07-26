@@ -19,6 +19,7 @@
 // the cell visibly crumbles instead of an ant appearing to be stuck.
 // ============================================================
 import { enterUnderground, exitToSurface, setCellProgress, entrance } from './underground.js';
+import { chooseDumpSite, depositSpoil } from './spoil.js';
 import {
   needsDiggers, hasClaimableCell, joinDigForce, leaveDigForce,
   claimDigCell, getClaim, releaseClaim, completeClaim,
@@ -30,6 +31,7 @@ import {
   SENSE_RADIUS, SEEK_STEER_RATE, NEST_ARRIVE_RADIUS,
   DIG_ENTER_CHANCE, DIG_ARRIVE_RADIUS, DIG_CARVE_MIN, DIG_CARVE_MAX,
   DIG_TRAVEL_TIMEOUT, DIG_EXIT_TIMEOUT,
+  SPOIL_DROP_RADIUS, SPOIL_HAUL_TIMEOUT,
 } from './config.js';
 
 function steerToward(ants, i, dt, targetX, targetY) {
@@ -48,6 +50,8 @@ function steerToward(ants, i, dt, targetX, targetY) {
 // — a leaked claim would block that cell for the rest of the project.
 function abandonDig(ants, i) {
   releaseClaim(ants.id[i]);
+  // No pellet involved: a claim is abandoned BEFORE the carve completes, so
+  // there is no spoil yet. Only a finished carve produces one.
   setCellProgress(ants.digTargetX[i], ants.digTargetY[i], 0);
   ants.digExiting[i] = 1;
   ants.digTravelTimer[i] = 0;
@@ -102,6 +106,31 @@ export function updateDigging(ants, i, dt) {
   // dropoff (NEST_ARRIVE_RADIUS), not the loose SENSE_RADIUS that
   // triggered recruitment above.
   if (ants.domain[i] === DOMAIN_SURFACE) {
+    // Hauling a pellet out: the spoil has to physically go somewhere before
+    // this ant is free to do anything else. Walk to the crater rim point
+    // spoil.js picked on the way up, drop it, and only then rejoin the dig.
+    if (ants.carryingSoil[i]) {
+      ants.digTravelTimer[i] += dt;
+      const dist = steerToward(ants, i, dt, ants.spoilTargetX[i], ants.spoilTargetY[i]);
+      if (dist <= SPOIL_DROP_RADIUS || ants.digTravelTimer[i] > SPOIL_HAUL_TIMEOUT) {
+        // Deposited where the ant actually stands, not at the target it was
+        // aiming for — so a hauler that gave up (wall-hugged, see
+        // DIG_TRAVEL_TIMEOUT's note) still leaves its pellet on the mound in
+        // a sensible direction instead of the dirt being destroyed.
+        depositSpoil(ants.x[i], ants.y[i]);
+        ants.carryingSoil[i] = 0;
+        ants.digTravelTimer[i] = 0;
+
+        // Pellet delivered. Back down for another cell if the project still
+        // wants hands, otherwise this ant's shift is over.
+        if (!needsDiggers() || !hasClaimableCell()) {
+          ants.state[i] = STATE_WANDER;
+          leaveDigForce(id);
+        }
+      }
+      return false;
+    }
+
     ants.digTravelTimer[i] += dt;
     const dist = steerToward(ants, i, dt, nest.x, nest.y);
     if (dist <= NEST_ARRIVE_RADIUS) {
@@ -150,6 +179,13 @@ export function updateDigging(ants, i, dt) {
       // via the progress report below) for the whole carving duration
       // instead of vanishing the instant the ant gets there.
       completeClaim(id);
+      // ...and the dirt that came out of it is now in this ant's mandibles.
+      // It doesn't get to claim another cell until it has hauled this out,
+      // which is what turns a digger from something that stands still for
+      // its whole life into something that visibly commutes.
+      ants.carryingSoil[i] = 1;
+      ants.digExiting[i] = 1;
+      ants.digTravelTimer[i] = 0;
     } else {
       // Fraction carved so far, for the renderer only — nothing in the
       // simulation reads it, and the cell stays solid until it flips.
@@ -172,10 +208,21 @@ export function updateDigging(ants, i, dt) {
       // against a tunnel wall forever — same role as sim.js's hard
       // position clamps.
       exitToSurface(ants, i);
-      ants.state[i] = STATE_WANDER;
       ants.digExiting[i] = 0;
       ants.digTravelTimer[i] = 0;
-      leaveDigForce(id);
+
+      if (ants.carryingSoil[i]) {
+        // Still holding a pellet — stay STATE_DIG and in the dig force, and
+        // pick the rim point to dump it on now that we know where on the
+        // surface this ant actually emerged (chooseDumpSite is
+        // position-dependent: nearest bin that's below optimal).
+        const site = chooseDumpSite(ants.x[i], ants.y[i]);
+        ants.spoilTargetX[i] = site.x;
+        ants.spoilTargetY[i] = site.y;
+      } else {
+        ants.state[i] = STATE_WANDER;
+        leaveDigForce(id);
+      }
     }
     return false;
   }
