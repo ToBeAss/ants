@@ -7,6 +7,8 @@
 import { ants } from './ants.js';
 import { updateIdleState, wander, avoidSurfaces, integrate, separationSteer } from './behaviors.js';
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
+import { checkDigRecruitment, updateDigging } from './digging.js';
+import { avoidTunnelWalls } from './underground.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
 import { rebuildSpatialGrid } from './spatialGrid.js';
 import { obstacles } from './world.js';
@@ -14,9 +16,10 @@ import {
   ANT_LENGTH,
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
   WALK_ANIM_FPS,
-  STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN,
+  STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN, STATE_DIG,
   HOME_VECTOR_ERROR_RATE,
   FORAGE_SPEED_MULT, RETURN_SPEED_MULT,
+  DOMAIN_UNDERGROUND,
 } from './config.js';
 
 export function simStep(dt) {
@@ -46,6 +49,7 @@ export function simStep(dt) {
       followTrail(ants, i, dt, ants.carrying[i] === 1); // eager pull if lost & still carrying — see pheromones.js
       checkFoodDetection(ants, i); // may promote WANDER -> FORAGE (skipped if already carrying)
       checkNestDetection(ants, i); // may promote WANDER -> RETURN (only if carrying, near true nest)
+      checkDigRecruitment(ants, i, dt); // may promote WANDER -> DIG (crosses underground the same tick — see digging.js)
     } else if (state === STATE_HANDLING) {
       // Brief handling pause — frozen in place, same treatment as idle:
       // small twitch for character, no movement, no animation advance.
@@ -54,6 +58,14 @@ export function simStep(dt) {
         ants.rotation[i] += (Math.random() - 0.5) * IDLE_TWITCH_AMOUNT;
       }
       continue;
+    } else if (state === STATE_DIG) {
+      // updateDigging returns true only while frozen mid-carve — same
+      // "skip movement entirely during the pause" treatment as
+      // STATE_HANDLING above. False covers both active steering AND
+      // the tick a digger finishes and crosses back to the surface
+      // (see digging.js) — that transition tick still moves normally,
+      // using its fresh domain/position, via the domain check below.
+      if (updateDigging(ants, i, dt)) continue;
     } else {
       // FORAGE or RETURN — task-committed: no idling, no wander noise,
       // straight-line steering toward the current target instead.
@@ -72,6 +84,30 @@ export function simStep(dt) {
         // care why it's being called, just biases toward what's nearby.
         followTrail(ants, i, dt);
       }
+    }
+
+    // Re-read domain here, not reuse anything captured before the
+    // dispatch above — checkDigRecruitment/updateDigging may have just
+    // crossed this ant between views this same tick (see digging.js),
+    // and movement/physics need to match WHERE it actually is right
+    // now, same reasoning as the currentState re-read just below.
+    // Underground movement is a genuinely separate system (own
+    // avoidance function, no pheromones, no obstacles, no
+    // separation/path-integration yet — see underground.js) rather
+    // than a branch inside the surface tail below.
+    if (ants.domain[i] === DOMAIN_UNDERGROUND) {
+      avoidTunnelWalls(ants, i, dt);
+      integrate(ants, i, dt);
+      ants.animPhase[i] += WALK_ANIM_FPS * dt;
+
+      // hard clamp to the underground grid's bounds — same backstop
+      // role as the surface wall clamp below, sized identically since
+      // the grid spans the same viewport dimensions
+      if (ants.x[i] < ANT_LENGTH) ants.x[i] = ANT_LENGTH;
+      if (ants.x[i] > w - ANT_LENGTH) ants.x[i] = w - ANT_LENGTH;
+      if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
+      if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
+      continue;
     }
 
     // Re-read state here rather than reuse the `state` captured above —

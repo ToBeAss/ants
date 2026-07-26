@@ -121,6 +121,11 @@ export const STATE_FORAGE = 2;   // beelining toward a detected food source
 export const STATE_RETURN = 3;   // beelining back to the nest, carrying food
 export const STATE_HANDLING = 4; // paused briefly for pickup or dropoff — see foraging.js for how
                                   // the `carrying` flag disambiguates which one it is on completion
+export const STATE_DIG = 5;      // underground, carving tunnel — see digging.js. Only DOMAIN_UNDERGROUND ants
+                                  // are ever in this state (see ants.js's domain flag); doubles as both
+                                  // "traveling to a frontier cell" and "paused, carving," disambiguated by
+                                  // stateTimer > 0, same dual-purpose pattern STATE_WANDER already uses for
+                                  // idling (see behaviors.js's updateIdleState)
 
 // Foraging — proximity-based detection only, no pheromones yet. Once an
 // ant is FORAGE/RETURN it's task-committed: no wander noise, no idling,
@@ -262,3 +267,16 @@ export const TUNNEL_AVOID_HUG_FRACTION = 0.85;  // 0-1 — target closeness once
 // already in.
 export const DOMAIN_SURFACE = 0;
 export const DOMAIN_UNDERGROUND = 1;
+
+// Digging (digging.js) — recruitment mirrors IDLE_ENTER_CHANCE's
+// per-second-probability pattern: a WANDERing, non-carrying ant near
+// the nest has a small per-second chance to become a digger, rather
+// than every ant that passes by triggering it — no direct player
+// command, same stewardship-not-control principle as everything else.
+export const DIG_ENTER_CHANCE = 0.03;    // per second, only rolled while within SENSE_RADIUS of the nest —
+                                          // deliberately lower than IDLE_ENTER_CHANCE (0.08): going
+                                          // underground is a bigger commitment than a brief idle pause
+export const DIG_ARRIVE_RADIUS = ANT_LENGTH + UNDERGROUND_CELL_SIZE; // px — same "close enough to physically
+                                          // act" idea as PICKUP_RADIUS/NEST_ARRIVE_RADIUS
+export const DIG_MIN = 0.6;              // seconds — brief pause "carving" a cell, same idea as PICKUP_MIN/DROPOFF_MIN
+export const DIG_MAX = 1.4;

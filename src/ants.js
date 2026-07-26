@@ -20,6 +20,11 @@ export const ants = {
   homeVectorY: new Float32Array(MAX_ANTS),
   domain: new Uint8Array(MAX_ANTS),      // DOMAIN_SURFACE or DOMAIN_UNDERGROUND — which view this ant
                                           // currently exists in (see underground.js's entrance linkage)
+  digTargetX: new Float32Array(MAX_ANTS), // the frontier cell a STATE_DIG ant is carving — remembered across
+  digTargetY: new Float32Array(MAX_ANTS), // its carve-pause so the cell converts at the END of the pause, not
+                                           // on arrival (see digging.js)
+  digExiting: new Uint8Array(MAX_ANTS),   // 1 once a digger has given up finding more to carve and is
+                                           // walking back to the entrance to cross up, else 0 (see digging.js)
   id: new Uint32Array(MAX_ANTS),
   count: 0,
 };
@@ -66,6 +71,9 @@ export function killAnt(index) {
     ants.homeVectorX[index] = ants.homeVectorX[last];
     ants.homeVectorY[index] = ants.homeVectorY[last];
     ants.domain[index] = ants.domain[last];
+    ants.digTargetX[index] = ants.digTargetX[last];
+    ants.digTargetY[index] = ants.digTargetY[last];
+    ants.digExiting[index] = ants.digExiting[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

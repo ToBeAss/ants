@@ -6,8 +6,8 @@ import { ants } from './ants.js';
 import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
 import { drawUnderground } from './undergroundRender.js';
+import { drawAnt, SPRITE_ANGLE_OFFSET } from './antSprite.js';
 import {
-  ANT_LENGTH, WALK_FRAME_COUNT,
   SHADOW_COLOR, SHADOW_LENGTH, SHADOW_WIDTH, SHADOW_OFFSET_Y,
   NEST_DRAW_RADIUS, FOOD_DRAW_RADIUS,
   PHEROMONE_COLOR, PHEROMONE_MAX,
@@ -16,42 +16,6 @@ import {
 
 export const canvas = document.getElementById('canvas');
 export const ctx = canvas.getContext('2d');
-
-// ------------------------------------------------------------
-// Sprite frames — the walk cycle (6 frames). Used for both wandering
-// AND idle: while idle, sim.js stops advancing animPhase, so the ant
-// simply holds on whatever frame it was mid-stride on — a natural
-// freeze rather than a separate rest pose.
-//
-// Faces "up" (-Y). rotation=0 in this sim means facing "right" (+X),
-// matching the Math.cos/sin convention used in integrate()/wander().
-// SPRITE_ANGLE_OFFSET corrects for that — adjust if a different-
-// orientation sprite is swapped in later.
-// ------------------------------------------------------------
-const SPRITE_ANGLE_OFFSET = Math.PI / 2;
-
-const walkFrames = [];
-let framesLoaded = 0;
-let spriteReady = false;
-
-for (let i = 0; i < WALK_FRAME_COUNT; i++) {
-  const img = new Image();
-  img.onload = () => {
-    framesLoaded++;
-    if (framesLoaded === WALK_FRAME_COUNT) spriteReady = true;
-  };
-  img.src = `assets/ant_${i}.png`;
-  walkFrames.push(img);
-}
-
-// Draw size in world px, independent of the source PNGs' resolution.
-// ANT_LENGTH is the nose-to-center distance used elsewhere (hard clamp,
-// etc.) — drawn nose-to-tail length is roughly double that.
-const SPRITE_DRAW_HEIGHT = ANT_LENGTH * 2.4;
-let spriteDrawWidth = SPRITE_DRAW_HEIGHT * 0.81; // fallback aspect until frame 0 loads
-walkFrames[0].addEventListener('load', () => {
-  spriteDrawWidth = SPRITE_DRAW_HEIGHT * (walkFrames[0].naturalWidth / walkFrames[0].naturalHeight);
-});
 
 export function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -76,41 +40,6 @@ function drawAntShadow(x, y, angle) {
   ctx.ellipse(0, 0, SHADOW_WIDTH, SHADOW_LENGTH, 0, 0, Math.PI * 2);
   ctx.fillStyle = SHADOW_COLOR;
   ctx.fill();
-  ctx.restore();
-}
-
-function drawAntFallback(x, y, angle) {
-  // Triangle placeholder — used only until frames have loaded, so
-  // there's never a blank frame on page load.
-  const ANT_WIDTH = 2.5;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const noseX = x + cos * ANT_LENGTH;
-  const noseY = y + sin * ANT_LENGTH;
-  const backX = x - cos * ANT_LENGTH * 0.6;
-  const backY = y - sin * ANT_LENGTH * 0.6;
-  const perpX = -sin * ANT_WIDTH;
-  const perpY = cos * ANT_WIDTH;
-
-  ctx.fillStyle = '#e8d8b8';
-  ctx.beginPath();
-  ctx.moveTo(noseX, noseY);
-  ctx.lineTo(backX + perpX, backY + perpY);
-  ctx.lineTo(backX - perpX, backY - perpY);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawAntSprite(x, y, angle, animPhase) {
-  const frame = walkFrames[Math.floor(animPhase) % WALK_FRAME_COUNT];
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle + SPRITE_ANGLE_OFFSET);
-  ctx.drawImage(
-    frame,
-    -spriteDrawWidth / 2, -SPRITE_DRAW_HEIGHT / 2,
-    spriteDrawWidth, SPRITE_DRAW_HEIGHT
-  );
   ctx.restore();
 }
 
@@ -216,11 +145,7 @@ function drawSurface() {
   for (let i = 0; i < ants.count; i++) {
     if (ants.domain[i] !== DOMAIN_SURFACE) continue; // underground-dwelling ants belong to the other draw path
     // drawAntShadow(ants.x[i], ants.y[i], ants.rotation[i]); // disabled for now — see config.js for tuning notes if re-enabling
-    if (spriteReady) {
-      drawAntSprite(ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
-    } else {
-      drawAntFallback(ants.x[i], ants.y[i], ants.rotation[i]);
-    }
+    drawAnt(ctx, ants.x[i], ants.y[i], ants.rotation[i], ants.animPhase[i]);
     if (ants.carrying[i]) {
       drawCarryIndicator(ants.x[i], ants.y[i]);
     }

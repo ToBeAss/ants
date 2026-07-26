@@ -125,6 +125,54 @@ export function expandUnlockedRegion(amount = UNDERGROUND_UNLOCKED_RADIUS_EXPAND
   unlockedRadius += amount;
 }
 
+// Finds the nearest DIRT cell that's both diggable (within the
+// unlocked region) and 4-neighbor-adjacent to an existing TUNNEL cell
+// — a real frontier reachable by carving outward from what's already
+// dug, not an isolated dirt pocket. Called by digging.js. Only scans
+// the unlocked region's bounding box (small and fixed relative to the
+// full grid), not the whole grid — cheap even once per active digger
+// per tick. Grows with unlockedRadius over time (container expansion),
+// same accepted tradeoff as spatialGrid.js's Map: revisit only if
+// this becomes a measured bottleneck.
+export function findFrontierCell(fromX, fromY) {
+  if (cols === 0 || rows === 0) return null;
+
+  const minCol = Math.max(0, Math.floor((unlockedCenter.x - unlockedRadius) / UNDERGROUND_CELL_SIZE));
+  const maxCol = Math.min(cols - 1, Math.ceil((unlockedCenter.x + unlockedRadius) / UNDERGROUND_CELL_SIZE));
+  const minRow = Math.max(0, Math.floor((unlockedCenter.y - unlockedRadius) / UNDERGROUND_CELL_SIZE));
+  const maxRow = Math.min(rows - 1, Math.ceil((unlockedCenter.y + unlockedRadius) / UNDERGROUND_CELL_SIZE));
+
+  let best = null;
+  let bestDistSq = Infinity;
+
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let col = minCol; col <= maxCol; col++) {
+      const idx = row * cols + col;
+      if (grid[idx] !== DIRT) continue;
+
+      const wx = (col + 0.5) * UNDERGROUND_CELL_SIZE;
+      const wy = (row + 0.5) * UNDERGROUND_CELL_SIZE;
+      if (!isDiggable(wx, wy)) continue;
+
+      const hasAdjacentTunnel =
+        (col > 0 && grid[idx - 1] === TUNNEL) ||
+        (col < cols - 1 && grid[idx + 1] === TUNNEL) ||
+        (row > 0 && grid[idx - cols] === TUNNEL) ||
+        (row < rows - 1 && grid[idx + cols] === TUNNEL);
+      if (!hasAdjacentTunnel) continue;
+
+      const dx = wx - fromX, dy = wy - fromY;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best = { x: wx, y: wy };
+      }
+    }
+  }
+
+  return best;
+}
+
 export function getUndergroundGrid() {
   return { grid, cols, rows, cellSize: UNDERGROUND_CELL_SIZE, entrance, unlockedCenter, unlockedRadius };
 }
@@ -136,10 +184,9 @@ export function getUndergroundGrid() {
 // view — no simultaneous dual-rendering, an ant is only ever in one
 // view's coordinate space at a time.
 //
-// NOT YET CALLED — nothing currently decides an ant should cross.
-// The first real caller is the digging task (later Phase B item);
-// until then this exists ready for it, same as avoidTunnelWalls()
-// above.
+// Called from digging.js: checkDigRecruitment() crosses a WANDERing
+// ant in via enterUnderground(), updateDigging() crosses it back out
+// via exitToSurface() once there's nothing left to dig.
 // ------------------------------------------------------------
 export function enterUnderground(ants, i) {
   ants.domain[i] = DOMAIN_UNDERGROUND;
@@ -170,11 +217,7 @@ export function exitToSurface(ants, i) {
 // the multi-obstacle bug that motivated avoidSurfaces() in the first
 // place.
 //
-// NOT YET CALLED from sim.js — no ant currently has a notion of
-// "which view/domain it's in" (every ant runs the surface loop
-// unconditionally). That flag is what entrance linkage (next Phase B
-// item) introduces; this function is ready for sim.js to call once
-// it exists.
+// Called from sim.js for every DOMAIN_UNDERGROUND ant, each tick.
 // ------------------------------------------------------------
 export function avoidTunnelWalls(ants, i, dt) {
   if (cols === 0 || rows === 0) return;
