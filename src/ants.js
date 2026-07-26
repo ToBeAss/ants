@@ -34,6 +34,11 @@ export const ants = {
                                            // `carrying` (food) rather than sharing it: an ant can't hold both, but
                                            // they're drawn differently, dropped in different places, and mean
                                            // different things to every state check that reads `carrying`
+  storeTargetX: new Float32Array(MAX_ANTS), // the chamber a STATE_STORE ant is carrying food to (provisioning.js)
+  storeTargetY: new Float32Array(MAX_ANTS),
+  storeTravelTimer: new Float32Array(MAX_ANTS), // bounded like digTravelTimer — a chamber around a bend can be
+                                           // unreachable by straight-line steering
+  storeExiting: new Uint8Array(MAX_ANTS), // 1 once the load is delivered and the ant is walking back out
   spoilTargetX: new Float32Array(MAX_ANTS), // the point on the crater rim a hauler is walking to (spoil.js). Its
   spoilTargetY: new Float32Array(MAX_ANTS), // own field rather than reusing digTargetX/Y, which still holds the
                                            // UNDERGROUND cell just carved — setCellProgress() reads that, so
@@ -72,6 +77,10 @@ export function spawnAnt(x, y) {
   ants.carryingSoil[i] = 0;
   ants.spoilTargetX[i] = 0;
   ants.spoilTargetY[i] = 0;
+  ants.storeTargetX[i] = 0;
+  ants.storeTargetY[i] = 0;
+  ants.storeTravelTimer[i] = 0;
+  ants.storeExiting[i] = 0;
   ants.id[i] = id;
   idToIndex.set(id, i);
   return id;
@@ -104,6 +113,10 @@ export function killAnt(index) {
     ants.carryingSoil[index] = ants.carryingSoil[last];
     ants.spoilTargetX[index] = ants.spoilTargetX[last];
     ants.spoilTargetY[index] = ants.spoilTargetY[last];
+    ants.storeTargetX[index] = ants.storeTargetX[last];
+    ants.storeTargetY[index] = ants.storeTargetY[last];
+    ants.storeTravelTimer[index] = ants.storeTravelTimer[last];
+    ants.storeExiting[index] = ants.storeExiting[last];
     ants.id[index] = ants.id[last];
     idToIndex.set(ants.id[index], index); // update the moved ant's mapping
   }

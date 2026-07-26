@@ -112,6 +112,34 @@ export function depositSpoil(x, y) {
   bins[bin] += SPOIL_HEIGHT_PER_PELLET;
 }
 
+// Rim radius at an arbitrary angle, interpolated between bin centres and
+// lightly smoothed across neighbours.
+//
+// The bins are a model of a continuous rim, not 24 actual wedges, and
+// drawing them as wedges made a real crater look like a pie chart. Ants also
+// deposit one pellet at a time, so at low totals the bin counts are noticeably
+// lumpy — a genuinely even rule still gives Poisson-ish scatter over 24 bins.
+// Some unevenness is correct (real spoil heaps are often piled to one side);
+// hard radial steps between neighbouring wedges are not.
+export function rimRadiusAt(angle) {
+  let t = angle % (Math.PI * 2);
+  if (t < 0) t += Math.PI * 2;
+
+  // Position in bin space, offset by half a bin because bin b is centred at
+  // (b + 0.5) * BIN_ARC.
+  const f = t / BIN_ARC - 0.5;
+  const i0 = Math.floor(f);
+  const frac = f - i0;
+  const at = (k) => bins[((k % SPOIL_BIN_COUNT) + SPOIL_BIN_COUNT) % SPOIL_BIN_COUNT];
+
+  // 3-tap smoothing on each side of the interpolation, so a single lucky bin
+  // reads as a bump on the rim rather than a spike.
+  const smooth = (k) => (at(k - 1) + 2 * at(k) + at(k + 1)) / 4;
+  const h = smooth(i0) * (1 - frac) + smooth(i0 + 1) * frac;
+
+  return SPOIL_INNER_RADIUS + Math.min(1, h / SPOIL_FULL_HEIGHT) * SPOIL_BAND_WIDTH;
+}
+
 export function getSpoil() {
   return {
     bins,
@@ -120,6 +148,7 @@ export function getSpoil() {
     innerRadius: SPOIL_INNER_RADIUS,
     bandWidth: SPOIL_BAND_WIDTH,
     fullHeight: SPOIL_FULL_HEIGHT,
+    total: bins.reduce((a, b) => a + b, 0),
     cx: nest.x,
     cy: nest.y,
   };

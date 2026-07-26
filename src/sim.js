@@ -8,6 +8,7 @@ import { ants } from './ants.js';
 import { updateIdleState, wander, avoidSurfaces, integrate, separationSteer } from './behaviors.js';
 import { checkFoodDetection, checkNestDetection, updateForageSteer, updateHandling } from './foraging.js';
 import { checkDigRecruitment, updateDigging } from './digging.js';
+import { updateStoring } from './provisioning.js';
 import { updateNestPlan } from './nestPlan.js';
 import { avoidTunnelWalls, pushOutOfDirt } from './underground.js';
 import { depositPheromone, decayPheromones, diffusePheromones, followTrail } from './pheromones.js';
@@ -18,10 +19,10 @@ import {
   IDLE_TWITCH_CHANCE, IDLE_TWITCH_AMOUNT,
   DIG_TWITCH_CHANCE, DIG_TWITCH_AMOUNT,
   WALK_ANIM_FPS,
-  STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN, STATE_DIG,
+  STATE_IDLE, STATE_WANDER, STATE_HANDLING, STATE_FORAGE, STATE_RETURN, STATE_DIG, STATE_STORE,
   HOME_VECTOR_ERROR_RATE,
   FORAGE_SPEED_MULT, RETURN_SPEED_MULT,
-  DOMAIN_UNDERGROUND,
+  DOMAIN_UNDERGROUND, ENTRANCE_EXIT_OVERSHOOT,
 } from './config.js';
 
 export function simStep(dt) {
@@ -62,6 +63,16 @@ export function simStep(dt) {
         ants.rotation[i] += (Math.random() - 0.5) * IDLE_TWITCH_AMOUNT;
       }
       continue;
+    } else if (state === STATE_STORE) {
+      // Carrying a load down to a chamber. Same shape as STATE_DIG: it spans
+      // both domains, and returns true only while frozen mid-handover.
+      if (updateStoring(ants, i, dt)) {
+        if (Math.random() < IDLE_TWITCH_CHANCE * dt) {
+          ants.rotation[i] += (Math.random() - 0.5) * IDLE_TWITCH_AMOUNT;
+        }
+        if (ants.domain[i] === DOMAIN_UNDERGROUND) pushOutOfDirt(ants, i);
+        continue;
+      }
     } else if (state === STATE_DIG) {
       // updateDigging returns true only while frozen mid-carve — same
       // "skip movement entirely during the pause" treatment as
@@ -128,7 +139,12 @@ export function simStep(dt) {
       // the grid spans the same viewport dimensions
       if (ants.x[i] < ANT_LENGTH) ants.x[i] = ANT_LENGTH;
       if (ants.x[i] > w - ANT_LENGTH) ants.x[i] = w - ANT_LENGTH;
-      if (ants.y[i] < ANT_LENGTH) ants.y[i] = ANT_LENGTH;
+      // Top edge deliberately allows an overshoot: the shaft mouth is a way
+      // OUT, and an ant leaving climbs above the edge and off the picture
+      // before it crosses domains (see atNestExit). Clamping it at
+      // ANT_LENGTH like the other three sides would pin it on the boundary
+      // and make it vanish in full view.
+      if (ants.y[i] < -ENTRANCE_EXIT_OVERSHOOT * 2) ants.y[i] = -ENTRANCE_EXIT_OVERSHOOT * 2;
       if (ants.y[i] > h - ANT_LENGTH) ants.y[i] = h - ANT_LENGTH;
 
       // ...and out of solid dirt, the underground counterpart of the

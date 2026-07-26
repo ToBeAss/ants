@@ -18,20 +18,23 @@
 // cell working on it. The pause reports progress to underground.js so
 // the cell visibly crumbles instead of an ant appearing to be stuck.
 // ============================================================
-import { enterUnderground, exitToSurface, setCellProgress, entrance } from './underground.js';
+import {
+  enterUnderground, exitToSurface, atNestExit, nestEntranceApproach,
+  setCellProgress, entrance,
+} from './underground.js';
 import { chooseDumpSite, depositSpoil } from './spoil.js';
 import {
   needsDiggers, hasClaimableCell, joinDigForce, leaveDigForce,
-  claimDigCell, getClaim, releaseClaim, completeClaim,
+  claimDigCell, getClaim, releaseClaim, completeClaim, routeWaypoint,
 } from './nestPlan.js';
 import { nest } from './world.js';
 import {
   STATE_WANDER, STATE_DIG,
   DOMAIN_SURFACE,
-  SENSE_RADIUS, SEEK_STEER_RATE, NEST_ARRIVE_RADIUS,
+  SENSE_RADIUS, SEEK_STEER_RATE, ENTRANCE_CROSS_RADIUS,
   DIG_ENTER_CHANCE, DIG_ARRIVE_RADIUS, DIG_CARVE_MIN, DIG_CARVE_MAX,
-  DIG_TRAVEL_TIMEOUT, DIG_EXIT_TIMEOUT,
-  SPOIL_DROP_RADIUS, SPOIL_HAUL_TIMEOUT,
+  DIG_TRAVEL_TIMEOUT, DIG_EXIT_TIMEOUT, ENTRANCE_EXIT_OVERSHOOT,
+  SPOIL_DROP_RADIUS, SPOIL_HAUL_TIMEOUT, SPOIL_DROP_MIN, SPOIL_DROP_MAX,
 } from './config.js';
 
 function steerToward(ants, i, dt, targetX, targetY) {
@@ -103,37 +106,52 @@ export function updateDigging(ants, i, dt) {
   // Not yet underground — walk to the nest, the single crossing point
   // (ROADMAP.md's entrance linkage), and only cross once physically
   // there. Same arrival precision foraging.js requires for a real
-  // dropoff (NEST_ARRIVE_RADIUS), not the loose SENSE_RADIUS that
+  // hole (ENTRANCE_CROSS_RADIUS), not the loose SENSE_RADIUS that
   // triggered recruitment above.
   if (ants.domain[i] === DOMAIN_SURFACE) {
     // Hauling a pellet out: the spoil has to physically go somewhere before
     // this ant is free to do anything else. Walk to the crater rim point
     // spoil.js picked on the way up, drop it, and only then rejoin the dig.
     if (ants.carryingSoil[i]) {
+      // Setting the pellet down — the ant is stopped on the crater while it
+      // does this, the same way a carve holds it at the dirt face. The whole
+      // haul was invisible without it: pop out, pellet appears, straight back
+      // down, with the actual moment of disposal never reading as an event.
+      if (ants.stateTimer[i] > 0) {
+        ants.stateTimer[i] -= dt;
+        if (ants.stateTimer[i] <= 0) {
+          // Deposited where the ant actually stands, not at the target it was
+          // aiming for — so a hauler that gave up (wall-hugged, see
+          // DIG_TRAVEL_TIMEOUT's note) still leaves its pellet on the mound in
+          // a sensible direction instead of the dirt being destroyed.
+          depositSpoil(ants.x[i], ants.y[i]);
+          ants.carryingSoil[i] = 0;
+          ants.digTravelTimer[i] = 0;
+
+          // Pellet delivered. Back down for another cell if the project still
+          // wants hands, otherwise this ant's shift is over.
+          if (!needsDiggers() || !hasClaimableCell()) {
+            ants.state[i] = STATE_WANDER;
+            leaveDigForce(id);
+          }
+        }
+        return true; // frozen mid-drop
+      }
+
       ants.digTravelTimer[i] += dt;
       const dist = steerToward(ants, i, dt, ants.spoilTargetX[i], ants.spoilTargetY[i]);
       if (dist <= SPOIL_DROP_RADIUS || ants.digTravelTimer[i] > SPOIL_HAUL_TIMEOUT) {
-        // Deposited where the ant actually stands, not at the target it was
-        // aiming for — so a hauler that gave up (wall-hugged, see
-        // DIG_TRAVEL_TIMEOUT's note) still leaves its pellet on the mound in
-        // a sensible direction instead of the dirt being destroyed.
-        depositSpoil(ants.x[i], ants.y[i]);
-        ants.carryingSoil[i] = 0;
-        ants.digTravelTimer[i] = 0;
-
-        // Pellet delivered. Back down for another cell if the project still
-        // wants hands, otherwise this ant's shift is over.
-        if (!needsDiggers() || !hasClaimableCell()) {
-          ants.state[i] = STATE_WANDER;
-          leaveDigForce(id);
-        }
+        ants.stateTimer[i] = SPOIL_DROP_MIN + Math.random() * (SPOIL_DROP_MAX - SPOIL_DROP_MIN);
       }
       return false;
     }
 
     ants.digTravelTimer[i] += dt;
-    const dist = steerToward(ants, i, dt, nest.x, nest.y);
-    if (dist <= NEST_ARRIVE_RADIUS) {
+    steerToward(ants, i, dt, nest.x, nest.y);
+    // Sharpen the turn as it closes, or it can't turn tightly enough to land
+    // on the hole and just circles it (see nestEntranceApproach).
+    const dist = nestEntranceApproach(ants, i, dt);
+    if (dist <= ENTRANCE_CROSS_RADIUS) {
       if (!hasClaimableCell()) {
         // Checked here, at the entrance, rather than only underground:
         // the plan can fill up or finish during the walk over, and an
@@ -200,8 +218,15 @@ export function updateDigging(ants, i, dt) {
     // up, rather than despawning mid-tunnel and popping back in at the
     // nest. Symmetric to the surface-side approach above.
     ants.digTravelTimer[i] += dt;
-    const dist = steerToward(ants, i, dt, entrance.x, entrance.y);
-    if (dist <= DIG_ARRIVE_RADIUS || ants.digTravelTimer[i] > DIG_EXIT_TIMEOUT) {
+    // Routed along the shaft, not beelined — the way out of a side chamber is
+    // an L and straight-line steering can't turn it (see routeWaypoint). Once
+    // the mouth is in sight, aimed ABOVE it so the ant walks up and out
+    // through it rather than stopping just short: leaving is a boundary
+    // crossing at the top of the cross-section, not arrival at a point.
+    const wp = routeWaypoint(ants.x[i], ants.y[i], entrance.x, entrance.y);
+    const climbing = wp.x === entrance.x && wp.y === entrance.y;
+    steerToward(ants, i, dt, wp.x, climbing ? entrance.y - ENTRANCE_EXIT_OVERSHOOT * 2 : wp.y);
+    if (atNestExit(ants, i) || ants.digTravelTimer[i] > DIG_EXIT_TIMEOUT) {
       // The timeout is a backstop, not the normal path: with no
       // pathfinding, an ant in a far chamber can fail to straight-line
       // its way back out. Surfacing it anyway beats leaving it grinding
@@ -255,7 +280,11 @@ export function updateDigging(ants, i, dt) {
     return false;
   }
 
-  const dist = steerToward(ants, i, dt, target.x, target.y);
+  // DIG_ARRIVE_RADIUS of slack: the target IS dirt, so the route only has to
+  // be clear up to the face the ant will stand at and carve.
+  const wp = routeWaypoint(ants.x[i], ants.y[i], target.x, target.y, DIG_ARRIVE_RADIUS);
+  steerToward(ants, i, dt, wp.x, wp.y);
+  const dist = Math.hypot(target.x - ants.x[i], target.y - ants.y[i]);
   if (dist <= DIG_ARRIVE_RADIUS) {
     ants.digTargetX[i] = target.x;
     ants.digTargetY[i] = target.y;

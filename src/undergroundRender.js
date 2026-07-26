@@ -16,9 +16,9 @@ import {
 import { drawAnt, drawCarryIndicator } from './antSprite.js';
 import {
   DOMAIN_UNDERGROUND,
-  UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR, ENTRANCE_COLOR,
+  UNDERGROUND_DIRT_COLOR, UNDERGROUND_TUNNEL_COLOR,
   CHAMBER_COLOR_QUEEN, CHAMBER_COLOR_BROOD, CHAMBER_COLOR_FOOD,
-  CHAMBER_COLOR_ATRIUM, PLAN_COLOR, SOIL_MARKER_COLOR,
+  CHAMBER_COLOR_ATRIUM, PLAN_COLOR, SOIL_MARKER_COLOR, FOOD_COLOR, CARRY_MARKER_COLOR,
 } from './config.js';
 
 // Parsed once from the palette above, for the carve-progress blend —
@@ -53,7 +53,7 @@ const CHAMBER_RING_INSET = 2; // px — keeps the ring on carved floor rather th
                               // where a dark ring would half-vanish into the dark earth
 
 export function drawUnderground(ctx) {
-  const { grid, progress, cols, rows, cellSize, entrance } = getUndergroundGrid();
+  const { grid, progress, cols, rows, cellSize } = getUndergroundGrid();
   if (cols === 0 || rows === 0) return;
 
   // Dirt fills the whole background in one rect; only tunnel cells get
@@ -107,6 +107,24 @@ export function drawUnderground(ctx) {
     ctx.stroke();
     ctx.fillStyle = style.color;
     ctx.fillText(style.label, c.x, c.y + 3);
+
+    // Food actually sitting in the room (provisioning.js). Drawn as a
+    // cluster of morsels rather than a number or a bar: the point is to see
+    // the larder filling up as foragers bring loads down, in the same visual
+    // language as food on the surface.
+    if (c.food > 0) {
+      ctx.fillStyle = FOOD_COLOR;
+      const n = Math.min(c.food, 40);
+      for (let k = 0; k < n; k++) {
+        // Deterministic scatter from the index, so morsels don't shimmer
+        // between frames the way Math.random() in a draw call would.
+        const a = k * 2.399963; // golden angle — even fill, no rings
+        const rr = (c.radius - 6) * Math.sqrt((k + 0.5) / 40);
+        ctx.beginPath();
+        ctx.arc(c.x + Math.cos(a) * rr, c.y + Math.sin(a) * rr, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   // The chamber under construction, dashed — you can see where the
@@ -141,11 +159,10 @@ export function drawUnderground(ctx) {
   }
   ctx.textAlign = 'start';
 
-  // Entrance marker — the single point linking the two views.
-  ctx.beginPath();
-  ctx.arc(entrance.x, entrance.y, 5, 0, Math.PI * 2);
-  ctx.fillStyle = ENTRANCE_COLOR;
-  ctx.fill();
+  // No entrance marker down here. The shaft mouth already reads as the way
+  // out — it's the one tunnel that reaches the top edge, and ants visibly
+  // walk up through it and off the picture. A dot on top of it only drew
+  // attention to a point where nothing happens.
 
   // Underground-dwelling ants — same drawAnt() as the surface view
   // (antSprite.js), so an ant looks identical whether it's above or
@@ -158,6 +175,9 @@ export function drawUnderground(ctx) {
       // instead of green — so a digger hauling its pellet up the shaft reads
       // as carrying something in the view where it does most of the walking.
       drawCarryIndicator(ctx, ants.x[i], ants.y[i], SOIL_MARKER_COLOR);
+    } else if (ants.carrying[i]) {
+      // A forager bringing a load down to a chamber (provisioning.js).
+      drawCarryIndicator(ctx, ants.x[i], ants.y[i], CARRY_MARKER_COLOR);
     }
   }
 }

@@ -72,8 +72,11 @@ export const SPOIL_COLOR = '#d6b585';     // the crater of excavated earth aroun
 export const UNDERGROUND_DIRT_COLOR = '#6f4c2e';   // packed earth
 export const UNDERGROUND_TUNNEL_COLOR = '#f0dcb4'; // open gallery — kept close to GROUND_COLOR so an ant looks
                                                     // equally readable in either view
-export const ENTRANCE_COLOR = '#8c5a14';  // the one point linking the views; dark enough to read against the
-                                           // light gallery it sits in
+// No ENTRANCE_COLOR any more. The underground view used to mark the entrance
+// with a dot; the shaft mouth is self-evidently the way out (it's the one
+// tunnel reaching the top edge, and ants walk up through it and off the
+// picture), so the dot only marked a spot where nothing happens. The surface
+// entrance is drawn with NEST_COLOR.
 
 // Chamber annotation (undergroundRender.js) — a ring + label per
 // chamber purpose, drawn INSIDE the finished chamber, i.e. on light
@@ -190,6 +193,10 @@ export const STATE_FORAGE = 2;   // beelining toward a detected food source
 export const STATE_RETURN = 3;   // beelining back to the nest, carrying food
 export const STATE_HANDLING = 4; // paused briefly for pickup or dropoff — see foraging.js for how
                                   // the `carrying` flag disambiguates which one it is on completion
+export const STATE_STORE = 6;    // carrying gathered food down into the nest to a chamber — see
+                                  // provisioning.js. Like STATE_DIG, an ant in this state may be in either
+                                  // domain: it walks to the entrance on the surface, crosses, delivers, and
+                                  // walks back out.
 export const STATE_DIG = 5;      // underground, carving tunnel — see digging.js. Only DOMAIN_UNDERGROUND ants
                                   // are ever in this state (see ants.js's domain flag); doubles as both
                                   // "traveling to a frontier cell" and "paused, carving," disambiguated by
@@ -205,7 +212,7 @@ export const STATE_DIG = 5;      // underground, carving tunnel — see digging.
 export const SENSE_RADIUS = 95;                 // px — was 75. How far a wandering ant NOTICES food, or (while
                                                   // carrying) that it's in the general vicinity of the
                                                   // nest — a broad awareness radius, same for both. This
-                                                  // is NOT delivery precision — see NEST_ARRIVE_RADIUS
+                                                  // is NOT the crossing threshold — see ENTRANCE_CROSS_RADIUS
                                                   // below for that. Sensing the nest switches steering to
                                                   // aim at its true position (see foraging.js), same as
                                                   // FORAGE already steers at food's true position, not an
@@ -215,16 +222,50 @@ export const NEST_RADIUS = 24;                  // px — counts as reaching the
                                                   // the true nest at all — see foraging.js's WANDER fallback)
 export const SEEK_STEER_RATE = 3.5;             // rad/sec — turn-toward-target speed while tasked
 export const FOOD_AMOUNT = 40;                  // was 10. Pickups per source before it's fully depleted (no auto-respawn — see world.js)
-export const NEST_CORNER_MARGIN = 60;           // px — nest inset from the bottom-left corner
-export const NEST_DRAW_RADIUS = 20;             // px — visual size of the nest marker
+// The nest sits at the centre of the surface view (world.js), which puts the
+// underground entrance at the top middle of the cross-section. There is no
+// longer a corner-inset constant: it was NEST_CORNER_MARGIN = 60, and the
+// corner placement quietly distorted the nest (a shaft that could only
+// zig-zag away from one wall, chambers sized by the world edge instead of
+// their depth, half the spoil crater off-world).
+export const NEST_DRAW_RADIUS = 13;             // px — visual size of the entrance hole. A real nest entrance is
+                                                 // barely wider than the ants using it; what makes an established
+                                                 // nest look big from above is the CRATER of spoil piled around it
+                                                 // (spoil.js), which grows on its own over the colony's life.
+                                                 // ENTRANCE_CROSS_RADIUS tracks this, so ants always cross AT the hole.
+                                                 // is deliberately no longer derived from this (see below).
 export const FOOD_DRAW_RADIUS = 9;              // px — visual size of a food marker. Was 6 — bumped up,
                                                   // partly cosmetic, partly to give PICKUP_RADIUS below more
                                                   // room now that it's actually derived from this.
-export const NEST_ARRIVE_RADIUS = NEST_DRAW_RADIUS + ANT_LENGTH; // px — tight delivery precision once the
-                                                  // true nest has been sensed — symmetric to PICKUP_RADIUS
-                                                  // for food. Must be physically at the nest, not just
-                                                  // "roughly nearby," to actually complete a dropoff.
-export const PICKUP_RADIUS = FOOD_DRAW_RADIUS + ANT_LENGTH; // px — same formula as NEST_ARRIVE_RADIUS above.
+// An ant must physically reach the hole to go down it. Tied to the DRAWN
+// entrance on purpose: this is the one radius that should track the marker,
+// because it's the moment an ant disappears from the surface, and a
+// threshold wider than the hole makes ants wink out of existence over open
+// sand. (It was briefly 26 against an 8px hole, which did exactly that.)
+// Half an ant-length of tolerance, so the body overlaps the hole rather than
+// the centre point having to land on it.
+export const ENTRANCE_CROSS_RADIUS = 4;         // px — essentially the centre of the hole. An ant should walk ONTO
+                                                 // the entrance and descend from the middle, not wink out the
+                                                 // moment it touches the rim.
+
+// Final approach to the entrance. An ant cannot turn tighter than
+// (speed / steer rate) — about 45/3.5 = 13px — so at walking speed it
+// physically CANNOT land on a target a few pixels across and orbits it
+// instead. That's what made ants circle the entrance.
+//
+// Turning radius has two levers. Slowing down was tried first and works, but
+// it reads as the ant hesitating at its own door. Sharpening the turn shrinks
+// the radius exactly as well at full speed, and looks like an ant homing in
+// decisively — which is what it is. (A third option, dragging the ant inward
+// positionally, was also tried: a pull strong enough to guarantee arrival
+// looks like suction.)
+export const ENTRANCE_APPROACH_RADIUS = 30;     // px — start sharpening here
+export const ENTRANCE_STEER_BOOST = 12.0;       // rad/sec of EXTRA turn rate at the hole itself, on top of
+                                                 // SEEK_STEER_RATE and ramped in with closeness. ~15 rad/sec
+                                                 // total gives a turning radius near 3px, inside
+                                                 // ENTRANCE_CROSS_RADIUS, so the ant settles instead of circling.
+export const PICKUP_RADIUS = FOOD_DRAW_RADIUS + ANT_LENGTH; // px — "close enough to touch it": the food's own drawn
+                                                  // size plus the ant's reach.
                                                   // Previously an independent ANT_LENGTH*1.4 (~7px) that
                                                   // happened to sit close to the old FOOD_DRAW_RADIUS (6px)
                                                   // by coincidence, not by design — every FORAGE ant steering
@@ -239,8 +280,11 @@ export const PICKUP_RADIUS = FOOD_DRAW_RADIUS + ANT_LENGTH; // px — same formu
 // foraging.js). Reuses stateTimer, same mechanism as IDLE_MIN/MAX.
 export const PICKUP_MIN = 0.5;  // seconds — was 0.3. Brief pause "grabbing" food before departing
 export const PICKUP_MAX = 1.0;  // was 0.7
-export const DROPOFF_MIN = 0.5; // was 0.3. Brief pause "handing off" food at the nest
-export const DROPOFF_MAX = 1.0; // was 0.7
+// There is deliberately no DROPOFF pause constant any more. A returning
+// forager used to stop at the nest marker to hand its food over, back when
+// that was where food entered the colony. It isn't: the handover happens at
+// a chamber inside the nest now (STORE_HANDOVER_MIN/MAX), so a pause at the
+// entrance was an ant stopping dead on the doorstep for no visible reason.
 
 // Path integration (dead reckoning) — RETURN steering uses this instead
 // of reading nest.x/y directly. Updated every tick an ant actually
@@ -382,7 +426,7 @@ export const DIG_ENTER_CHANCE = 0.06;    // per second, only rolled while within
                                           // 0.03 back when digging was always available; now that it's
                                           // need-gated, a project that IS open should staff up reasonably fast.
 export const DIG_ARRIVE_RADIUS = ANT_LENGTH + UNDERGROUND_CELL_SIZE; // px — same "close enough to physically
-                                          // act" idea as PICKUP_RADIUS/NEST_ARRIVE_RADIUS
+                                          // act" idea as PICKUP_RADIUS/ENTRANCE_CROSS_RADIUS
 export const DIG_FORCE_MAX = 8;          // simultaneous diggers on the active project — the rest of the colony
                                           // keeps foraging. Excavation is a side activity, not the whole colony
                                           // downing tools.
@@ -419,24 +463,58 @@ export const DIG_EXIT_TIMEOUT = 45;      // seconds — backstop on the walk bac
 export const SPOIL_BIN_COUNT = 24;       // angular bins around the entrance the crater is tracked in — a crater is
                                           // radially symmetric to a first approximation, so a heightfield would be
                                           // a lot of machinery for the same picture
-export const SPOIL_INNER_RADIUS = 26;    // px — inner edge of the mound, just clear of NEST_DRAW_RADIUS so the
-                                          // nest marker still reads as the hole in the middle
+export const SPOIL_INNER_RADIUS = NEST_DRAW_RADIUS + 6; // px — inner edge of the crater, kept clear of the
+                                          // entrance hole so the hole stays readable at the centre of it.
+                                          // DERIVED, because as a hardcoded 12 it silently ended up INSIDE the
+                                          // hole when NEST_DRAW_RADIUS grew to 13 — which put every dump site on
+                                          // top of the entrance, so haulers emerged already standing on their
+                                          // target and dropped without visibly walking anywhere.
 export const SPOIL_BAND_WIDTH = 30;      // px — how far out the rim creeps once a direction is fully piled
 export const SPOIL_HEIGHT_PER_PELLET = 1; // one carved cell = one pellet
 export const SPOIL_FULL_HEIGHT = 26;     // pellets in one bin before that direction is piled as high as it gets
                                           // (further pellets there stop pushing the rim outward)
-export const SPOIL_LEVEL_TOLERANCE = 1.5; // pellets — how far above the lowest pile still counts as "below
+export const SPOIL_LEVEL_TOLERANCE = 1.0; // pellets — how far above the lowest pile still counts as "below
                                           // optimal". This is what stops every hauler walking to the single
                                           // globally-lowest bin: several bins are usually tied, so each ant takes
                                           // the nearest of them and the crater fills evenly on its own
 export const SPOIL_EDGE_MARGIN = 14;     // px — dump points must stay this far inside the world. The nest is in a
                                           // corner, so half the crater's directions are off-world and the colony
                                           // correctly piles on the side it has room for
-export const SPOIL_DROP_RADIUS = 9;      // px — close enough to the chosen rim point to drop the pellet
+export const SPOIL_DROP_RADIUS = 6;      // px — close enough to the chosen rim point to drop the pellet. Tight
+                                          // enough that the ant actually walks out to the rim rather than
+                                          // stopping short of it.
+export const SPOIL_DROP_MIN = 0.7;       // seconds spent setting the pellet down on the mound. Real disposal
+export const SPOIL_DROP_MAX = 1.5;       // isn't instantaneous — an ant places its load, and often works it into
+                                          // the heap. Without a pause the whole trip was invisible: a hauler
+                                          // popped out of the entrance, teleported its pellet onto the crater and
+                                          // dropped straight back down, so the one moment that explains where all
+                                          // that earth is coming from never actually read as an event. Longer
+                                          // than the food handover (STORE_HANDOVER_*) because it happens out in
+                                          // the open where it can be seen.
 export const SPOIL_HAUL_TIMEOUT = 25;    // seconds — give-up bound on the walk to the rim, same role as
                                           // DIG_TRAVEL_TIMEOUT. On expiry the pellet is dropped where the ant
                                           // stands (still binned by direction), so spoil is never destroyed and a
                                           // wall-hugged hauler can't hold a dig-force slot forever
+
+// Provisioning (provisioning.js) — a forager's load doesn't vanish into a
+// number at the nest marker any more; it gets carried down and put
+// somewhere. Food goes where it's CONSUMED: a store chamber if the colony
+// has one with room, otherwise the deepest chamber, where the brood and
+// queen live.
+export const CHAMBER_FOOD_PER_AREA = 0.02; // units of food one square pixel of store chamber holds. Ties larder
+                                          // capacity to the rooms actually dug, so storage demand and storage
+                                          // space describe the same thing rather than drifting apart.
+export const STORE_ARRIVE_RADIUS = 14;    // px — close enough to the chamber centre to hand the load over
+export const ENTRANCE_EXIT_OVERSHOOT = ANT_LENGTH * 2; // px ABOVE the top of the cross-section an ant must climb
+                                          // before it counts as having left the nest — far enough that the whole
+                                          // sprite has cleared the edge, so it walks off the top of the picture
+                                          // rather than blinking out on it. Ants entering are placed the same
+                                          // distance above the edge and walk down into frame, so both crossings
+                                          // happen off-screen and the shaft mouth just looks like a way out.
+export const STORE_HANDOVER_MIN = 0.6;    // seconds — the handover pause, a beat longer than a surface dropoff:
+export const STORE_HANDOVER_MAX = 1.4;    // this is the trophallaxis moment, not a drop on the floor
+export const STORE_TRAVEL_TIMEOUT = 30;   // seconds — bound on the walk in, same role as DIG_TRAVEL_TIMEOUT
+export const STORE_EXIT_TIMEOUT = 45;     // seconds — bound on the walk back out
 
 // Nest planning (nestPlan.js) — the colony decides WHAT to excavate and
 // WHEN, and diggers carry out that plan. Chambers exist for a purpose and

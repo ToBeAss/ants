@@ -27,6 +27,8 @@ import {
   TUNNEL_AVOID_STEER_BASE,
   TUNNEL_AVOID_STEER_URGENCY,
   TUNNEL_AVOID_HUG_FRACTION,
+  ANT_LENGTH, ENTRANCE_EXIT_OVERSHOOT, NEST_TUNNEL_RADIUS,
+  ENTRANCE_APPROACH_RADIUS, ENTRANCE_STEER_BOOST,
   DOMAIN_SURFACE,
   DOMAIN_UNDERGROUND,
   NEST_DRAW_RADIUS,
@@ -209,12 +211,58 @@ export function getUndergroundGrid() {
 // ant in via enterUnderground(), updateDigging() crosses it back out
 // via exitToSurface() once there's nothing left to dig.
 // ------------------------------------------------------------
+// Final approach to the surface entrance: sharpens the ant's turn toward the
+// hole as it closes, and returns how far it still is from the centre.
+//
+// An ant's minimum turning radius is speed/steer-rate (~13px at a walk), so
+// at full speed it cannot land on a target a few pixels across — it orbits.
+// Raising the steer rate shrinks that radius without touching speed, which
+// matters: slowing on approach fixes the geometry just as well but reads as
+// the ant hesitating at its own door.
+//
+// Additive, like every other steering behaviour in this project — it nudges
+// on top of whatever seek-steering the ant's task is already doing.
+export function nestEntranceApproach(ants, i, dt) {
+  const dx = nest.x - ants.x[i];
+  const dy = nest.y - ants.y[i];
+  const dist = Math.hypot(dx, dy);
+  if (dist >= ENTRANCE_APPROACH_RADIUS || dist < 0.0001) return dist;
+
+  const closeness = 1 - dist / ENTRANCE_APPROACH_RADIUS; // 0 at the rim, 1 at the centre
+  let diff = Math.atan2(dy, dx) - ants.rotation[i];
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  ants.rotation[i] += diff * ENTRANCE_STEER_BOOST * closeness * dt;
+  return dist;
+}
+
 export function enterUnderground(ants, i) {
   ants.domain[i] = DOMAIN_UNDERGROUND;
+  // Arrives at the very mouth of the shaft, at the top edge of the
+  // cross-section, and walks down from there — so an ant enters the tunnel
+  // where the tunnel actually starts. The surface side only lets an ant
+  // cross once it is physically on the entrance hole
+  // (ENTRANCE_CROSS_RADIUS, which tracks the drawn marker), so the two views
+  // agree about where the crossing happens.
   ants.x[i] = entrance.x;
-  ants.y[i] = entrance.y + UNDERGROUND_CELL_SIZE; // just inside the dug starting chamber, not on its boundary
-  ants.rotation[i] = Math.PI / 2 + (Math.random() - 0.5) * 0.8; // heading down into the chamber, not back up
+  ants.y[i] = entrance.y - ENTRANCE_EXIT_OVERSHOOT; // above the top edge, off-screen: it walks DOWN into frame
+  ants.rotation[i] = Math.PI / 2 + (Math.random() - 0.5) * 0.4; // heading down into the shaft, not back up
                                                                  // at the ceiling it just came through
+}
+
+// True once an ant climbing the shaft has reached the top edge of the
+// cross-section — i.e. it has walked up and out of the picture, which is
+// what leaving the nest looks like from below.
+//
+// A boundary crossing rather than "within N px of the entrance point": the
+// point test made ants evaporate partway up the shaft, several body-lengths
+// short of the opening. The x check keeps it honest — only the shaft mouth
+// reaches the top edge, but nothing should count as leaving just because it
+// drifted high somewhere else.
+export function atNestExit(ants, i) {
+  return (
+    ants.y[i] <= entrance.y - ENTRANCE_EXIT_OVERSHOOT &&
+    Math.abs(ants.x[i] - entrance.x) <= NEST_TUNNEL_RADIUS + ANT_LENGTH
+  );
 }
 
 export function exitToSurface(ants, i) {
@@ -274,6 +322,16 @@ export function exitToSurface(ants, i) {
 // of a wall keeps its old heading, walks straight back in, and oscillates.
 export function pushOutOfDirt(ants, i) {
   if (cols === 0 || rows === 0) return false;
+  if (ants.y[i] < 0) {
+    // Above the top edge. That is open air at the SHAFT MOUTH — the one
+    // opening, which ants deliberately climb out through and drop in
+    // through — and the underside of solid ground everywhere else. Exempting
+    // the whole edge instead let an ant that had climbed out drift sideways
+    // over packed earth and sink into it unchecked, which put burial back to
+    // 1.9% after it had been driven to zero.
+    if (Math.abs(ants.x[i] - entrance.x) <= NEST_TUNNEL_RADIUS + ANT_LENGTH) return false;
+    ants.y[i] = ANT_LENGTH; // drifted off the mouth — put it back under the surface
+  }
 
   const col = Math.floor(ants.x[i] / UNDERGROUND_CELL_SIZE);
   const row = Math.floor(ants.y[i] / UNDERGROUND_CELL_SIZE);

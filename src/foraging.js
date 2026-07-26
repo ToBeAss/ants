@@ -7,12 +7,13 @@
 // discovery mechanism used to find food in the first place.
 // ============================================================
 import { nearestFood, depleteFood, nest } from './world.js';
-import { addColonyFood } from './colony.js';
+import { beginStoring } from './provisioning.js';
+import { nestEntranceApproach } from './underground.js';
 import {
   STATE_WANDER, STATE_FORAGE, STATE_RETURN, STATE_HANDLING,
-  SENSE_RADIUS, PICKUP_RADIUS, NEST_RADIUS, NEST_ARRIVE_RADIUS,
+  SENSE_RADIUS, PICKUP_RADIUS, NEST_RADIUS, ENTRANCE_CROSS_RADIUS,
   SEEK_STEER_RATE, ANT_LENGTH,
-  PICKUP_MIN, PICKUP_MAX, DROPOFF_MIN, DROPOFF_MAX,
+  PICKUP_MIN, PICKUP_MAX,
 } from './config.js';
 
 // Called during WANDER. Promotes WANDER -> FORAGE if food is within
@@ -33,7 +34,7 @@ export function checkFoodDetection(ants, i) {
 // senses the TRUE nest is nearby. Doesn't deliver here — just switches
 // into RETURN, where updateForageSteer will steer it directly at the
 // nest's real position and require tight physical proximity
-// (NEST_ARRIVE_RADIUS) before actually completing dropoff. Same pattern
+// (ENTRANCE_CROSS_RADIUS) before actually going down it. Same pattern
 // as checkFoodDetection promoting WANDER -> FORAGE, not an instant pickup.
 export function checkNestDetection(ants, i) {
   if (!ants.carrying[i]) return;
@@ -80,7 +81,7 @@ export function updateForageSteer(ants, i, dt, width, height) {
     if (nestSensed) {
       targetX = nest.x;
       targetY = nest.y;
-      arriveRadius = NEST_ARRIVE_RADIUS;
+      arriveRadius = ENTRANCE_CROSS_RADIUS;
     } else {
       const rawTargetX = ants.x[i] - ants.homeVectorX[i];
       const rawTargetY = ants.y[i] - ants.homeVectorY[i];
@@ -101,6 +102,16 @@ export function updateForageSteer(ants, i, dt, width, height) {
   diff = Math.atan2(Math.sin(diff), Math.cos(diff));
   ants.rotation[i] += diff * SEEK_STEER_RATE * dt;
 
+  // Sharpen the final approach to the entrance, or the ant can't turn tightly
+  // enough to land on it and visibly circles the hole instead.
+  //
+  // This belongs HERE and not only in the tasks that cross into the nest: a
+  // returning forager is in STATE_RETURN for the whole approach and only
+  // becomes STATE_STORE once it has actually arrived, so putting it solely in
+  // provisioning.js/digging.js left the ants doing the approaching — the ones
+  // that were visibly spinning — untouched.
+  if (!isForaging && nestSensed) nestEntranceApproach(ants, i, dt);
+
   if (isForaging) {
     if (dist <= arriveRadius) {
       ants.state[i] = STATE_HANDLING;
@@ -115,9 +126,15 @@ export function updateForageSteer(ants, i, dt, width, height) {
 
   if (dist <= arriveRadius) {
     if (nestSensed) {
-      // physically at the true nest now — deliver
-      ants.state[i] = STATE_HANDLING;
-      ants.stateTimer[i] = DROPOFF_MIN + Math.random() * (DROPOFF_MAX - DROPOFF_MIN);
+      // Physically at the entrance — go straight down, no pause. There used
+      // to be a dropoff pause here, from when this was where the food
+      // actually changed hands. It isn't any more: the handover happens at a
+      // chamber inside the nest (provisioning.js), and that's where the
+      // pause belongs. Leaving it here made every forager stop dead on the
+      // doorstep for no reason anyone could see.
+      ants.homeVectorX[i] = 0; // recalibrate — confirmed physically at the nest
+      ants.homeVectorY[i] = 0;
+      beginStoring(ants, i);
     } else {
       // reached the BELIEF, but the true nest was never sensed along
       // the way — the estimate was wrong. No pheromones to fall back
@@ -131,23 +148,19 @@ export function updateForageSteer(ants, i, dt, width, height) {
 }
 
 // Called while STATE_HANDLING. Counts down stateTimer (reusing the same
-// field/pattern as idle); on expiry, completes whichever transition
-// triggered the pause. Disambiguated by the `carrying` flag rather than
-// a separate pickup/dropoff state: not yet carrying means this pause
-// followed a FORAGE arrival (pickup); already carrying means it
-// followed a RETURN arrival at the true nest (dropoff).
+// field/pattern as idle); on expiry the ant picks its food up and heads
+// home.
+//
+// PICKUP ONLY, as of the provisioning rework. This used to serve both ends
+// of the trip, disambiguated by the `carrying` flag — but the dropoff end no
+// longer pauses at the nest at all: a returning forager walks straight in and
+// the handover pause happens at the chamber where the food actually changes
+// hands (provisioning.js). `carrying` is still what tells the two apart
+// conceptually; there's just only one case left here.
 export function updateHandling(ants, i, dt) {
   ants.stateTimer[i] -= dt;
   if (ants.stateTimer[i] > 0) return; // still paused
 
-  if (!ants.carrying[i]) {
-    ants.carrying[i] = 1;
-    ants.state[i] = STATE_RETURN;
-  } else {
-    ants.carrying[i] = 0;
-    ants.homeVectorX[i] = 0; // recalibrate — confirmed physically at the nest now
-    ants.homeVectorY[i] = 0;
-    ants.state[i] = STATE_WANDER;
-    addColonyFood();
-  }
+  ants.carrying[i] = 1;
+  ants.state[i] = STATE_RETURN;
 }

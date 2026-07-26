@@ -43,7 +43,7 @@ import { ants, idToIndex } from './ants.js';
 import { colony } from './colony.js';
 import {
   entrance, depthOf, carveDisc,
-  getGridSize, cellCoords, cellCenter, inGrid, isTunnelCell, hasAdjacentTunnel,
+  getGridSize, cellCoords, cellCenter, inGrid, isTunnel, isTunnelCell, hasAdjacentTunnel,
   digCell,
 } from './underground.js';
 import {
@@ -58,6 +58,7 @@ import {
   BAND_ATRIUM_MIN, BAND_ATRIUM_MAX, BAND_FOOD_MIN, BAND_FOOD_MAX,
   BAND_BROOD_MIN, BAND_BROOD_MAX,
   BROOD_AREA_PER_ANT, ATRIUM_AREA_PER_ANT, STORE_AREA_PER_FOOD,
+  CHAMBER_FOOD_PER_AREA,
   NEST_PROJECT_COOLDOWN, NEST_TUNNEL_RADIUS,
   NEST_CHAMBER_CLEARANCE_SHALLOW, NEST_CHAMBER_CLEARANCE_DEEP,
   NEST_SITE_ATTEMPTS,
@@ -154,7 +155,7 @@ const DEMAND_RULES = [
   },
 ];
 
-// Finished chambers: { x, y, radius }. No purpose field — that's derived
+// Finished chambers: { x, y, radius, food }. No purpose field — that's derived
 // from depth (purposeOf) and changes over the nest's life. Phases C/E read
 // this to place the queen and to find the brood chambers nurses work in.
 let chambers = [];
@@ -241,7 +242,7 @@ export function initNestPlan() {
   const cy = Math.max(inset, Math.min(worldH - inset, bottom.y));
 
   carveDisc(cx, cy, FOUNDING_CHAMBER_RADIUS);
-  chambers.push({ x: cx, y: cy, radius: FOUNDING_CHAMBER_RADIUS });
+  chambers.push({ x: cx, y: cy, radius: FOUNDING_CHAMBER_RADIUS, food: 0 });
 }
 
 export function getChambers() {
@@ -273,6 +274,42 @@ export function getQueenChamber() {
   return deepest;
 }
 
+// How much food a room can hold, from its floor area — so larder capacity
+// and the rooms actually dug describe the same thing.
+function chamberFoodCapacity(c) {
+  return Math.PI * c.radius * c.radius * CHAMBER_FOOD_PER_AREA;
+}
+
+// Where an incoming load should go. Food goes where it is CONSUMED, so the
+// fallback is the deepest chamber — the brood and queen live at the bottom,
+// and most ants don't warehouse food in rooms at all. A dedicated store is
+// a granivore speciality, so it's a preference: used when the colony has
+// one with room, skipped when it doesn't.
+export function chooseStoreChamber() {
+  let store = null;
+  for (const c of chambers) {
+    if (purposeOf(c) !== PURPOSE_FOOD) continue;
+    if (c.food >= chamberFoodCapacity(c)) continue;
+    if (!store || c.food < store.food) store = c;
+  }
+  return store ?? getQueenChamber();
+}
+
+// Credits a delivered load to whichever chamber the ant reached.
+export function depositChamberFood(x, y) {
+  let best = null;
+  let bestDistSq = Infinity;
+  for (const c of chambers) {
+    const dx = c.x - x, dy = c.y - y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      best = c;
+    }
+  }
+  if (best) best.food++;
+}
+
 // ------------------------------------------------------------
 // Per-tick planning — called once per tick from sim.js, not per ant.
 // ------------------------------------------------------------
@@ -291,7 +328,7 @@ export function updateNestPlan(dt) {
         // here on (purposeOf). project.purpose was the colony's INTENT in
         // digging it, which is a different thing and doesn't outlive the
         // project.
-        chambers.push({ x: project.x, y: project.y, radius: project.radius });
+        chambers.push({ x: project.x, y: project.y, radius: project.radius, food: 0 });
       }
       project = null;
       cooldown = NEST_PROJECT_COOLDOWN;
@@ -413,6 +450,126 @@ function shaftPointAtDepth(d) {
   }
   const last = shaft[shaft.length - 1];
   return { x: last.x, y: last.y };
+}
+
+// ------------------------------------------------------------
+// Getting about inside the nest.
+//
+// Straight-line seeking cannot turn a corner, and every chamber hangs off the
+// shaft on a stub — so the route between a side chamber and anywhere else is
+// an L. Ants beelining at their target walked into the chamber wall and
+// circled it until a give-up timeout fired; measured, this was the single
+// biggest source of ants going nowhere underground, and it hit food carriers
+// hardest (hundreds of circling episodes per run) because they make the
+// longest trips.
+//
+// This is NOT pathfinding, and shouldn't become it. The colony dug this
+// structure and every ant knows it: there is one shaft, everything hangs off
+// it, so "get onto the shaft, follow it to the right depth, then head out to
+// the target" is the whole of nest navigation. Real ants get around their own
+// nests by wall-following and familiarity, not by planning routes.
+//
+// The beeline is still tried first, and taken whenever it's actually clear —
+// so an ant crossing a chamber, or already in the shaft below its target,
+// just walks straight there.
+// ------------------------------------------------------------
+const ROUTE_ON_SHAFT_DIST = 22; // px from the shaft centreline that counts as "in the shaft"
+
+// Is there open tunnel the whole way? Cheap ray-march; the alternative is
+// routing an ant around a corner it could simply have walked through.
+//
+// `stopShort` leaves the last few pixels unchecked, which a DIGGER needs: its
+// target is a dirt cell by definition — that's the thing it came to remove —
+// so a check that insisted on open tunnel all the way to the endpoint could
+// never succeed, and diggers got routed away from cells they were standing
+// right next to.
+function clearLineBetween(fromX, fromY, toX, toY, stopShort = 0) {
+  const dist = Math.hypot(toX - fromX, toY - fromY);
+  const usable = dist - stopShort;
+  if (usable <= 0) return true; // already inside the slack — nothing between them to block
+  const steps = Math.max(1, Math.ceil(usable / (UNDERGROUND_CELL_SIZE * 0.5)));
+  for (let s = 1; s <= steps; s++) {
+    const t = (s / steps) * (usable / dist);
+    const x = fromX + (toX - fromX) * t;
+    const y = fromY + (toY - fromY) * t;
+    if (y < 0) continue; // above the surface is the shaft mouth, not earth
+    if (!isTunnel(x, y)) return false;
+  }
+  return true;
+}
+
+// Which room a point is in — including the one currently being EXCAVATED.
+// That inclusion is the whole reason this is a function: a chamber isn't
+// registered until its last cell is open, so while it is being dug it is
+// invisible to routing, and diggers heading for the last few cells of a
+// nearly-finished room had no stub mouth to route through. They beelined at
+// a target around the corner and orbited the wall instead — exactly the case
+// the router was added to fix, in the one room where it didn't apply.
+function roomAt(x, y) {
+  for (const c of chambers) {
+    if (Math.hypot(x - c.x, y - c.y) <= c.radius + CHAMBER_STUB_LENGTH) return c;
+  }
+  if (project && project.kind !== KIND_SHAFT) {
+    if (Math.hypot(x - project.x, y - project.y) <= project.radius + CHAMBER_STUB_LENGTH) return project;
+  }
+  return null;
+}
+
+// The next point an ant should steer at to get from where it is to somewhere
+// else in the nest.
+//
+// Builds the route as a list of via-points — the mouth of the stub it's
+// standing in, then the shaft corners between here and there, then the target
+// — and returns the FURTHEST one it can see in a straight line. That last
+// part matters: it means the ant always aims at something it can actually
+// walk to, cuts corners whenever the geometry allows, and can never be sent
+// at a point on the far side of a wall. Hand-stepping along the shaft instead
+// (a fixed distance, or node by node) either cut through the earth between
+// two zigs or left ants oscillating between two corners.
+export function routeWaypoint(fromX, fromY, toX, toY, targetSlack = 0) {
+  if (clearLineBetween(fromX, fromY, toX, toY, targetSlack)) return { x: toX, y: toY };
+  if (shaft.length === 0) return { x: toX, y: toY };
+
+  const fromDepth = depthOf(fromY);
+  const toDepth = depthOf(toY);
+  const via = [];
+
+  // If the ant is out in a room, the first thing it must do is get back to the
+  // mouth of that room's stub — which is at the ROOM's depth, not the ant's
+  // own. An ant at the top or bottom of a round chamber sits at a depth where
+  // the shaft has no opening at all.
+  const fromRoom = roomAt(fromX, fromY);
+  if (fromRoom) via.push(shaftPointAtDepth(depthOf(fromRoom.y)));
+
+  // Then the shaft corners between the two depths, in travel order.
+  const lo = Math.min(fromDepth, toDepth);
+  const hi = Math.max(fromDepth, toDepth);
+  const corners = shaft.filter((n) => depthOf(n.y) >= lo && depthOf(n.y) <= hi);
+  if (toDepth < fromDepth) corners.reverse();
+  for (const n of corners) via.push({ x: n.x, y: n.y });
+
+  // ...and if the DESTINATION is a room, its stub mouth before the room
+  // itself. Symmetric to the departure case above, and the one that matters
+  // for ants heading IN: an ant already in the shaft alongside its target
+  // chamber has no corners between it and the target, so without this the
+  // route degenerates to the beeline that walks into the chamber wall.
+  const toRoom = roomAt(toX, toY);
+  if (toRoom) via.push(shaftPointAtDepth(depthOf(toRoom.y)));
+
+  via.push({ x: toX, y: toY });
+
+  // Furthest visible via-point wins. Scanning stops at the first blocked one:
+  // anything past it is behind the same wall, and this keeps the ray-marching
+  // to a couple of checks in the common case.
+  let best = via[0];
+  for (let k = 0; k < via.length; k++) {
+    // Only the destination gets the slack — every via-point before it is a
+    // point in open tunnel and has to be reachable outright.
+    const slack = k === via.length - 1 ? targetSlack : 0;
+    if (!clearLineBetween(fromX, fromY, via[k].x, via[k].y, slack)) break;
+    best = via[k];
+  }
+  return best;
 }
 
 // ------------------------------------------------------------

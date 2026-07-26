@@ -5,7 +5,7 @@
 import { ants } from './ants.js';
 import { nest, food, obstacles } from './world.js';
 import { getPheromoneGrid } from './pheromones.js';
-import { getSpoil } from './spoil.js';
+import { getSpoil, rimRadiusAt } from './spoil.js';
 import { drawUnderground } from './undergroundRender.js';
 import { drawAnt, drawCarryIndicator, SPRITE_ANGLE_OFFSET } from './antSprite.js';
 import {
@@ -96,20 +96,36 @@ function drawPheromones() {
 // BEFORE the nest marker so the marker stays the hole in the middle, and
 // as annular wedges per angular bin — the rim creeps outward in whichever
 // directions the colony has been dumping.
+const SPOIL_RIM_SAMPLES = 96; // angular samples for the crater outline — enough that the rim reads as a
+                               // continuous curve rather than the 24 bins underneath it
+
 function drawSpoilMound() {
-  const { bins, binCount, binArc, innerRadius, bandWidth, fullHeight, cx, cy } = getSpoil();
-  ctx.fillStyle = SPOIL_COLOR;
-  for (let b = 0; b < binCount; b++) {
-    if (bins[b] <= 0) continue;
-    const outer = innerRadius + Math.min(1, bins[b] / fullHeight) * bandWidth;
-    const a0 = b * binArc;
-    const a1 = a0 + binArc;
-    ctx.beginPath();
-    ctx.arc(cx, cy, outer, a0, a1);
-    ctx.arc(cx, cy, innerRadius, a1, a0, true);
-    ctx.closePath();
-    ctx.fill();
+  const { total, innerRadius, cx, cy } = getSpoil();
+  if (total <= 0) return;
+
+  // One filled ring: the outer edge follows the smoothed rim, the inner edge
+  // is the constant lip around the entrance hole. Drawn as a single path
+  // rather than per-bin wedges, which made a crater look like a pie chart —
+  // the bins are a model of a continuous rim, not 24 physical sectors.
+  ctx.beginPath();
+  for (let k = 0; k <= SPOIL_RIM_SAMPLES; k++) {
+    const a = (k / SPOIL_RIM_SAMPLES) * Math.PI * 2;
+    const r = rimRadiusAt(a);
+    const px = cx + Math.cos(a) * r;
+    const py = cy + Math.sin(a) * r;
+    if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
   }
+  ctx.closePath();
+  // Inner edge wound the opposite way, so the even-odd/nonzero fill leaves
+  // the entrance hole itself clear.
+  ctx.moveTo(cx + innerRadius, cy);
+  for (let k = SPOIL_RIM_SAMPLES; k >= 0; k--) {
+    const a = (k / SPOIL_RIM_SAMPLES) * Math.PI * 2;
+    ctx.lineTo(cx + Math.cos(a) * innerRadius, cy + Math.sin(a) * innerRadius);
+  }
+  ctx.closePath();
+  ctx.fillStyle = SPOIL_COLOR;
+  ctx.fill('evenodd');
 }
 
 function drawWorld() {

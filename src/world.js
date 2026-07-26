@@ -8,7 +8,7 @@
 // NOTE: nest does not currently re-position on window resize. Acceptable
 // for now; revisit together if resizing mid-run becomes common.
 // ============================================================
-import { FOOD_AMOUNT, NEST_CORNER_MARGIN } from './config.js';
+import { FOOD_AMOUNT } from './config.js';
 
 export const nest = { x: 0, y: 0 };
 
@@ -28,9 +28,18 @@ export function addObstacle(x, y, radius) {
 }
 
 export function initWorld(width, height) {
-  // bottom-left corner, inset enough to clear the wall-hugging margin
-  nest.x = NEST_CORNER_MARGIN;
-  nest.y = height - NEST_CORNER_MARGIN;
+  // Centre of the surface view, which also puts the underground entrance at
+  // the top middle of its cross-section (underground.js derives it from
+  // nest.x). Was the bottom-left corner, which cost more than it looked:
+  // the descending shaft had a wall immediately to one side, so it could
+  // only zig-zag one way and the nest grew lopsided; chambers hung on the
+  // wall side were squeezed by the world edge rather than by their depth;
+  // the spoil crater had half its directions off-world; and diggers
+  // recruited against the wall got carried along it by avoidSurfaces'
+  // hugging, away from the nest (see DIG_TRAVEL_TIMEOUT in digging.js).
+  // Centring removes all four at once and makes the tunnel pattern legible.
+  nest.x = width / 2;
+  nest.y = height / 2;
   food.length = 0;
 }
 
